@@ -17,3 +17,5 @@ resources/whisper/models/
 resources/piper/models/
 /tmp/
 server/hermes-voice-bridge/.venv/
+__pycache__/
+*.pyc
