@@ -114,6 +114,8 @@ export function SettingsPanel({
 
 // ───────── Microfone ─────────
 
+type MicStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+
 function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -123,8 +125,15 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [micStatus, setMicStatus] = useState<MicStatus>('unknown');
   // Hold the running test capture across renders.
   const captureRef = useMemo(() => ({ current: null as Awaited<ReturnType<typeof openCapture>> | null }), []);
+
+  const refreshMicStatus = useCallback(async () => {
+    const s = await window.vg.audio.getMicStatus();
+    setMicStatus(s);
+    return s;
+  }, []);
 
   const refreshDevices = useCallback(async (alreadyHavePermission = false): Promise<void> => {
     try {
@@ -145,8 +154,27 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
   }, []);
 
   useEffect(() => {
+    void refreshMicStatus();
     void refreshDevices(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const requestPermission = useCallback(async () => {
+    setError(null);
+    const ok = await window.vg.audio.requestMic();
+    const status = await refreshMicStatus();
+    if (ok && status === 'granted') {
+      // Now that the OS said yes, repopulate labels.
+      await refreshDevices();
+    } else if (status === 'denied') {
+      setError(
+        'O macOS continua a recusar. Carrega "Abrir Definições do Sistema" abaixo e ativa a Voice Gateway na lista do Microfone.',
+      );
+    }
+  }, [refreshMicStatus, refreshDevices]);
+
+  const openOsSettings = useCallback(async () => {
+    await window.vg.audio.openMicSettings();
   }, []);
 
   const persist = useCallback(
@@ -181,11 +209,19 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
 
   return (
     <div className="flex flex-col gap-5">
+      <Section title="Permissão do macOS">
+        <MicPermissionCard
+          status={micStatus}
+          onRequest={requestPermission}
+          onOpenSettings={openOsSettings}
+        />
+      </Section>
+
       <Section title="Microfone a usar">
-        {needsPermission && (
+        {needsPermission && micStatus !== 'denied' && (
           <CommandHint
             variant="info"
-            message="Concede acesso ao microfone para o macOS revelar os nomes dos dispositivos."
+            message='Concede acesso ao microfone (botão "Pedir permissão" acima) para o macOS revelar os nomes dos dispositivos.'
           />
         )}
         <div className="flex gap-2">
@@ -240,6 +276,59 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
           )}
         </div>
       </Section>
+    </div>
+  );
+}
+
+function MicPermissionCard({
+  status,
+  onRequest,
+  onOpenSettings,
+}: {
+  status: MicStatus;
+  onRequest: () => void;
+  onOpenSettings: () => void;
+}): JSX.Element {
+  if (status === 'granted') {
+    return (
+      <div className="rounded-xl border border-green-800/60 bg-green-950/30 px-3 py-2 text-xs text-green-200">
+        ✓ O macOS está a dar acesso ao microfone à Voice Gateway.
+      </div>
+    );
+  }
+  if (status === 'denied' || status === 'restricted') {
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-red-800 bg-red-950/40 px-3 py-3 text-xs text-red-100">
+        <p>
+          O macOS está a <strong>negar</strong> o microfone à Voice Gateway. A
+          permissão tem de ser concedida no painel do Sistema — abre-o e ativa
+          o toggle ao lado de <em>Voice Gateway</em>.
+        </p>
+        <Button size="sm" onClick={onOpenSettings}>
+          Abrir Definições do Sistema
+        </Button>
+      </div>
+    );
+  }
+  if (status === 'not-determined') {
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-yellow-800 bg-yellow-950/30 px-3 py-3 text-xs text-yellow-100">
+        <p>O macOS ainda não pediu a tua autorização para o microfone.</p>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={onRequest}>
+            Pedir permissão agora
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onOpenSettings}>
+            Abrir Definições do Sistema
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  // unknown / non-mac
+  return (
+    <div className="rounded-xl border border-bg-subtle bg-bg-panel/60 px-3 py-2 text-xs text-zinc-300">
+      Estado da permissão: <span className="font-mono">{status}</span>
     </div>
   );
 }

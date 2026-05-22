@@ -70,6 +70,11 @@ interface VgApi {
     bargeIn: () => void;
     reset: () => void;
   };
+  audio: {
+    getMicStatus: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>;
+    requestMic: () => Promise<boolean>;
+    openMicSettings: () => Promise<boolean>;
+  };
   stt: {
     onStatus: (cb: (s: SttStatus) => void) => () => void;
   };

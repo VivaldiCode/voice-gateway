@@ -37,7 +37,13 @@ mac:
         - arm64
   hardenedRuntime: true
   gatekeeperAssess: false
-  identity: null
+  # Ad-hoc sign (identity: false → '-'). Gives the bundle a stable code
+  # signature across rebuilds so macOS treats every rebuild as the same
+  # app — critical for the microphone permission cache, which is keyed by
+  # the designated requirement. With `identity: null` the bundle stays
+  # unsigned and each rebuild looks like a new app, so granted permissions
+  # silently evaporate.
+  identity: false
   icon: resources/icon.icns
   # macOS refuses to surface a permission prompt for the microphone without
   # NSMicrophoneUsageDescription in Info.plist; without it, getUserMedia

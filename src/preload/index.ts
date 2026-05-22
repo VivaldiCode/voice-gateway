@@ -53,6 +53,13 @@ const api = {
     reset: (): void => ipcRenderer.send(IPC.CONV_RESET),
   },
 
+  audio: {
+    getMicStatus: (): Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'> =>
+      ipcRenderer.invoke(IPC.AUDIO_MIC_STATUS),
+    requestMic: (): Promise<boolean> => ipcRenderer.invoke(IPC.AUDIO_MIC_REQUEST),
+    openMicSettings: (): Promise<boolean> => ipcRenderer.invoke(IPC.AUDIO_OPEN_MIC_SETTINGS),
+  },
+
   stt: {
     onStatus: (
       cb: (

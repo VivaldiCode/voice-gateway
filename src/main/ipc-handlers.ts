@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow } from 'electron';
+import { ipcMain, shell, systemPreferences, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import WebSocket from 'ws';
 import { CLIENT_VERSION, IPC } from '@shared/constants';
@@ -330,6 +330,42 @@ export function registerIpcHandlers(
         }),
     ],
     [IPC.TTS_PREPARE, async () => prepareTts()],
+    [
+      IPC.AUDIO_MIC_STATUS,
+      async () => {
+        if (process.platform !== 'darwin') return 'granted';
+        try {
+          return systemPreferences.getMediaAccessStatus('microphone');
+        } catch (err) {
+          log.warn('[VG] getMediaAccessStatus failed', err);
+          return 'unknown';
+        }
+      },
+    ],
+    [
+      IPC.AUDIO_MIC_REQUEST,
+      async () => {
+        if (process.platform !== 'darwin') return true;
+        try {
+          return await systemPreferences.askForMediaAccess('microphone');
+        } catch (err) {
+          log.warn('[VG] askForMediaAccess failed', err);
+          return false;
+        }
+      },
+    ],
+    [
+      IPC.AUDIO_OPEN_MIC_SETTINGS,
+      async () => {
+        if (process.platform === 'darwin') {
+          await shell.openExternal(
+            'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+          );
+          return true;
+        }
+        return false;
+      },
+    ],
   ];
 
   for (const [channel, handler] of handlers) {
