@@ -39,6 +39,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           aria-label="Definições"
           onClick={onOpenSettings}
           data-testid="open-settings"
+          className="vg-no-drag"
         >
           <SettingsIcon className="h-4 w-4" />
         </Button>
@@ -59,7 +60,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
       </div>
 
       <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6">
-        <StateOrb state={conv.state} />
+        <StateOrb state={conv.state} level={conv.level} />
         <CallButton
           state={conv.state}
           onPress={conv.pressTalk}

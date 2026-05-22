@@ -71,6 +71,7 @@ export interface AudioCaptureOptions {
 }
 
 export type FrameListener = (frame: Int16Array) => void;
+export type LevelListener = (rms: number) => void;
 
 export class AudioCapture {
   private ctx: AudioContext | null = null;
@@ -78,6 +79,7 @@ export class AudioCapture {
   private node: AudioWorkletNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private listeners = new Set<FrameListener>();
+  private levelListeners = new Set<LevelListener>();
   private muted = false;
 
   async start(opts: AudioCaptureOptions = {}): Promise<void> {
@@ -116,6 +118,16 @@ export class AudioCapture {
       const buf = event.data as ArrayBuffer;
       const frame = new Int16Array(buf);
       for (const l of this.listeners) l(frame);
+      if (this.levelListeners.size > 0) {
+        // RMS in 0..1 range.
+        let sum = 0;
+        for (let i = 0; i < frame.length; i++) {
+          const v = (frame[i] ?? 0) / 0x8000;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / Math.max(1, frame.length));
+        for (const l of this.levelListeners) l(rms);
+      }
     };
     this.node = node;
 
@@ -143,7 +155,16 @@ export class AudioCapture {
 
   onFrame(cb: FrameListener): () => void {
     this.listeners.add(cb);
-    return () => this.listeners.delete(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+
+  onLevel(cb: LevelListener): () => void {
+    this.levelListeners.add(cb);
+    return () => {
+      this.levelListeners.delete(cb);
+    };
   }
 }
 

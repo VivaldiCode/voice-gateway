@@ -50,6 +50,7 @@ export const IPC = {
   SETTINGS_SET: 'vg:settings:set',
   SETTINGS_RESET: 'vg:settings:reset',
   SETTINGS_CHANGED: 'vg:settings:changed',
+  SETTINGS_OPEN_WINDOW: 'vg:settings:open-window',
   PAIR_TEST: 'vg:pair:test',
   PAIR_SAVE: 'vg:pair:save',
   CONNECTION_STATUS: 'vg:connection:status',

@@ -20,24 +20,86 @@ import { PIPER_VOICES } from '../../shared/piper-voices';
 import type { TtsStatus, VoiceInfo } from '../global';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 
-type Tab = 'voz' | 'reconhecimento' | 'ativacao' | 'conexao' | 'avancado';
+type Tab = 'voz' | 'microfone' | 'reconhecimento' | 'ativacao' | 'conexao' | 'avancado';
 
 export interface SettingsPanelProps {
   settings: Settings;
   onClose: () => void;
   onRePair: () => void;
+  /** 'side' = legacy slide-in modal; 'window' = full-viewport in a dedicated BrowserWindow. */
+  layout?: 'side' | 'window';
 }
 
 const TABS: { id: Tab; label: string; icon: typeof Volume2 }[] = [
   { id: 'voz', label: 'Voz', icon: Volume2 },
+  { id: 'microfone', label: 'Microfone', icon: Mic2 },
   { id: 'reconhecimento', label: 'Reconhecimento', icon: Mic2 },
   { id: 'ativacao', label: 'Ativação', icon: Sliders },
   { id: 'conexao', label: 'Conexão', icon: Cable },
   { id: 'avancado', label: 'Avançado', icon: AlertTriangle },
 ];
 
-export function SettingsPanel({ settings, onClose, onRePair }: SettingsPanelProps): JSX.Element {
+export function SettingsPanel({
+  settings,
+  onClose,
+  onRePair,
+  layout = 'side',
+}: SettingsPanelProps): JSX.Element {
   const [tab, setTab] = useState<Tab>('voz');
+
+  const body = (
+    <div
+      className={cn(
+        'flex flex-col border-bg-subtle bg-bg-panel shadow-2xl',
+        layout === 'window' ? 'h-full w-full' : 'h-full w-full max-w-md border-l',
+      )}
+      onClick={layout === 'side' ? (e) => e.stopPropagation() : undefined}
+    >
+      <header className="vg-drag flex items-center justify-between border-b border-bg-subtle pr-3 pt-4 pb-3 pl-[88px]">
+        <h2 className="text-lg font-semibold">Definições</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
+          aria-label="Fechar"
+        >
+          fechar
+        </button>
+      </header>
+      <nav className="flex shrink-0 flex-wrap gap-1 border-b border-bg-subtle px-3 py-2 text-xs">
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={cn(
+              'flex items-center gap-2 rounded px-3 py-2 transition',
+              tab === id ? 'bg-bg-subtle text-white' : 'text-zinc-400 hover:text-white',
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        ))}
+      </nav>
+      <main className="flex-1 overflow-y-auto px-5 py-4">
+        {tab === 'voz' && <VozTab settings={settings} />}
+        {tab === 'microfone' && <MicrofoneTab settings={settings} />}
+        {tab === 'reconhecimento' && <ReconhecimentoTab settings={settings} />}
+        {tab === 'ativacao' && <AtivacaoTab settings={settings} />}
+        {tab === 'conexao' && <ConexaoTab settings={settings} onRePair={onRePair} />}
+        {tab === 'avancado' && <AvancadoTab />}
+      </main>
+    </div>
+  );
+
+  if (layout === 'window') {
+    return (
+      <div role="region" aria-label="Definições" className="h-full w-full bg-bg">
+        {body}
+      </div>
+    );
+  }
   return (
     <div
       role="dialog"
@@ -45,49 +107,190 @@ export function SettingsPanel({ settings, onClose, onRePair }: SettingsPanelProp
       className="fixed inset-0 z-30 flex items-stretch justify-end bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div
-        className="flex h-full w-full max-w-md flex-col border-l border-bg-subtle bg-bg-panel shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="vg-drag flex items-center justify-between border-b border-bg-subtle px-5 py-4">
-          <h2 className="text-lg font-semibold">Definições</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
-            aria-label="Fechar"
+      {body}
+    </div>
+  );
+}
+
+// ───────── Microfone ─────────
+
+function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    settings.audio.inputDeviceId ?? null,
+  );
+  const [needsPermission, setNeedsPermission] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  // Hold the running test capture across renders.
+  const captureRef = useMemo(() => ({ current: null as Awaited<ReturnType<typeof openCapture>> | null }), []);
+
+  const refreshDevices = useCallback(async (alreadyHavePermission = false): Promise<void> => {
+    try {
+      if (!alreadyHavePermission) {
+        // Tickle permission first so labels populate.
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      }
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const inputs = all.filter((d) => d.kind === 'audioinput');
+      setDevices(inputs);
+      setNeedsPermission(inputs.every((d) => !d.label));
+      setError(null);
+    } catch (err) {
+      setNeedsPermission(true);
+      setError((err as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshDevices(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const persist = useCallback(
+    (id: string | null) => {
+      void window.vg.settings.set({
+        audio: { ...settings.audio, inputDeviceId: id },
+      });
+    },
+    [settings.audio],
+  );
+
+  const startTest = useCallback(async () => {
+    if (captureRef.current) return;
+    setError(null);
+    try {
+      const cap = await openCapture(selectedId, (rms) => setLevel(rms));
+      captureRef.current = cap;
+      setTesting(true);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [selectedId, captureRef]);
+
+  const stopTest = useCallback(() => {
+    void captureRef.current?.stop();
+    captureRef.current = null;
+    setTesting(false);
+    setLevel(0);
+  }, [captureRef]);
+
+  useEffect(() => () => stopTest(), [stopTest]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Section title="Microfone a usar">
+        {needsPermission && (
+          <CommandHint
+            variant="info"
+            message="Concede acesso ao microfone para o macOS revelar os nomes dos dispositivos."
+          />
+        )}
+        <div className="flex gap-2">
+          <select
+            value={selectedId ?? ''}
+            onChange={(e) => {
+              const v = e.target.value || null;
+              setSelectedId(v);
+              persist(v);
+              if (testing) {
+                stopTest();
+                setTimeout(() => void startTest(), 50);
+              }
+            }}
+            className="h-10 flex-1 rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
           >
-            fechar
-          </button>
-        </header>
-        <nav
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-bg-subtle px-3 py-2 text-xs"
-        >
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={cn(
-                'flex items-center gap-2 rounded px-3 py-2 transition',
-                tab === id ? 'bg-bg-subtle text-white' : 'text-zinc-400 hover:text-white',
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </nav>
-        <main className="flex-1 overflow-y-auto px-5 py-4">
-          {tab === 'voz' && <VozTab settings={settings} />}
-          {tab === 'reconhecimento' && <ReconhecimentoTab settings={settings} />}
-          {tab === 'ativacao' && <AtivacaoTab settings={settings} />}
-          {tab === 'conexao' && <ConexaoTab settings={settings} onRePair={onRePair} />}
-          {tab === 'avancado' && <AvancadoTab />}
-        </main>
+            <option value="">Predefinido do sistema</option>
+            {devices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Dispositivo ${d.deviceId.slice(0, 6)}`}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => void refreshDevices()}
+            aria-label="Recarregar lista"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+        {error && <CommandHint message={error} variant="error" />}
+      </Section>
+
+      <Section title="Testa o teu microfone">
+        <p className="text-xs text-zinc-500">
+          Fala normalmente. A barra deve mexer com a tua voz; se ficar parada,
+          escolhe outro microfone na lista acima.
+        </p>
+        <VuMeter level={level} active={testing} />
+        <div className="flex gap-2">
+          {testing ? (
+            <Button variant="danger" onClick={stopTest}>
+              Parar
+            </Button>
+          ) : (
+            <Button onClick={() => void startTest()}>
+              <Play className="mr-1 h-4 w-4" />
+              Começar teste
+            </Button>
+          )}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function VuMeter({ level, active }: { level: number; active: boolean }): JSX.Element {
+  // Visual mapping: RMS often peaks around 0.1-0.3 for normal speech.
+  const pct = Math.min(100, Math.round(level * 240));
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="relative h-4 w-full overflow-hidden rounded-full bg-bg-subtle">
+        <div
+          className={cn(
+            'h-full transition-all duration-75',
+            active
+              ? pct > 80
+                ? 'bg-red-500'
+                : pct > 50
+                  ? 'bg-yellow-400'
+                  : 'bg-state-listening'
+              : 'bg-bg-subtle',
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex justify-between text-[10px] uppercase tracking-wider text-zinc-500">
+        <span>silêncio</span>
+        <span>fala normal</span>
+        <span>alto</span>
       </div>
     </div>
   );
+}
+
+async function openCapture(
+  deviceId: string | null,
+  onLevel: (rms: number) => void,
+): Promise<{ stop: () => Promise<void> }> {
+  // Late import to keep AudioCapture out of the SSR/transform path of tests.
+  const { AudioCapture } = await import('../lib/audio-capture');
+  const cap = new AudioCapture();
+  await cap.start({ deviceId: deviceId ?? null });
+  cap.onLevel(onLevel);
+  return {
+    stop: async () => {
+      try {
+        await cap.stop();
+      } catch {
+        // ignore
+      }
+    },
+  };
 }
 
 // ───────── Voz ─────────

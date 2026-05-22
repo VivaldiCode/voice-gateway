@@ -49,6 +49,7 @@ interface VgApi {
     set: (patch: Partial<Settings>) => Promise<Settings>;
     reset: () => Promise<Settings>;
     onChange: (cb: (s: Settings) => void) => () => void;
+    openWindow: () => void;
   };
   pair: {
     test: (info: PairingInfo) => Promise<PairResult>;

@@ -25,6 +25,8 @@ export interface ConversationApi {
   connection: ConnectionDisplay;
   error: string | null;
   sttStatus: SttStatus;
+  /** Mic input level in 0..1 (RMS). Only updated while capturing. */
+  level: number;
   pressTalk: () => void;
   releaseTalk: () => void;
   cancel: () => void;
@@ -43,6 +45,22 @@ export function useConversation(): ConversationApi {
   const [connection, setConnection] = useState<ConnectionDisplay>(INITIAL_CONNECTION);
   const [error, setError] = useState<string | null>(null);
   const [sttStatus, setSttStatus] = useState<SttStatus>({ state: 'idle' });
+  const [level, setLevel] = useState(0);
+  const [inputDeviceId, setInputDeviceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.vg.settings.get().then((s) => {
+      if (!cancelled) setInputDeviceId(s.audio.inputDeviceId ?? null);
+    });
+    const off = window.vg.settings.onChange((s) =>
+      setInputDeviceId(s.audio.inputDeviceId ?? null),
+    );
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
 
   const capture = useMemo(() => new AudioCapture(), []);
   const playback = useMemo(() => new AudioPlayback(), []);
@@ -98,27 +116,38 @@ export function useConversation(): ConversationApi {
 
   useEffect(() => {
     if (state === 'CAPTURING') {
-      void capture.start().then(() => {
-        const off = capture.onFrame((frame) => {
-          const copy = new ArrayBuffer(frame.byteLength);
-          new Uint8Array(copy).set(new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength));
-          window.vg.conversation.sendAudioFrame(copy);
+      void capture
+        .start({ deviceId: inputDeviceId ?? null })
+        .then(() => {
+          const offFrame = capture.onFrame((frame) => {
+            const copy = new ArrayBuffer(frame.byteLength);
+            new Uint8Array(copy).set(
+              new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength),
+            );
+            window.vg.conversation.sendAudioFrame(copy);
+          });
+          const offLevel = capture.onLevel((rms) => setLevel(rms));
+          capture.setMuted(false);
+          (capture as unknown as { _off?: () => void })._off = () => {
+            offFrame();
+            offLevel();
+          };
+        })
+        .catch((err: Error) => {
+          setError(`Não consegui aceder ao microfone: ${err.message}`);
         });
-        capture.setMuted(false);
-        // store cleanup
-        (capture as unknown as { _off?: () => void })._off = off;
-      });
     } else {
       const r = capture as unknown as { _off?: () => void };
       r._off?.();
       void capture.stop();
+      setLevel(0);
     }
     if (state === 'SPEAKING') {
       playback.beginUtterance('pcm16_22050');
     } else if (state === 'IDLE' || state === 'LISTENING_WAKE') {
       playback.endUtterance();
     }
-  }, [state, capture, playback]);
+  }, [state, capture, playback, inputDeviceId]);
 
   return {
     state,
@@ -126,6 +155,7 @@ export function useConversation(): ConversationApi {
     connection,
     error,
     sttStatus,
+    level,
     pressTalk: () => window.vg.conversation.pttPress(),
     releaseTalk: () => window.vg.conversation.pttRelease(),
     cancel: () => window.vg.conversation.cancel(),

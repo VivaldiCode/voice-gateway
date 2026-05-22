@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type Tray } from 'electron';
+import { app, BrowserWindow, ipcMain, type Tray, screen } from 'electron';
 import log from 'electron-log/main';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -26,7 +26,58 @@ log.info('[VG] main process boot');
 
 const settings = createSettingsStore();
 let mainWindow: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 const getMainWindow = (): BrowserWindow | null => mainWindow;
+
+function loadRendererInto(win: BrowserWindow, view?: 'settings'): void {
+  const query = view ? { view } : undefined;
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
+    const base = new URL(process.env['ELECTRON_RENDERER_URL']);
+    if (query) base.searchParams.set('view', query.view);
+    void win.loadURL(base.toString());
+  } else {
+    void win.loadFile(join(__dirname, '../renderer/index.html'), { query });
+  }
+}
+
+function openSettingsWindow(): void {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const maxW = Math.min(720, display.workAreaSize.width - 80);
+  const maxH = Math.min(820, display.workAreaSize.height - 80);
+  const win = new BrowserWindow({
+    width: maxW,
+    height: maxH,
+    minWidth: 540,
+    minHeight: 560,
+    backgroundColor: '#0b0d10',
+    title: 'Definições — Voice Gateway',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    show: false,
+    icon: resolveResource('icon.png'),
+    parent: mainWindow ?? undefined,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.once('ready-to-show', () => {
+    win.show();
+    // Mirror current STT/TTS status so the panel doesn't have to re-fetch.
+    win.webContents.send(IPC.STT_STATUS, sttStatus);
+    win.webContents.send(IPC.TTS_STATUS, ttsStatus);
+  });
+  win.on('closed', () => {
+    if (settingsWindow === win) settingsWindow = null;
+  });
+  loadRendererInto(win, 'settings');
+  settingsWindow = win;
+}
 const unregisterIpc = registerIpcHandlers(settings, getMainWindow, async () => {
   if (!activeTts) return { ok: false, message: 'TTS adapter not initialised yet.' };
   try {
@@ -41,7 +92,6 @@ app.on('will-quit', () => unregisterIpc());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const isDev = !app.isPackaged;
 
 let tray: Tray | null = null;
 let unregisterHotkey: () => void = () => undefined;
@@ -245,15 +295,13 @@ function createMainWindow(): BrowserWindow {
     if (mainWindow === win) mainWindow = null;
   });
 
-  if (isDev && process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(process.env['ELECTRON_RENDERER_URL']);
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'));
-  }
+  loadRendererInto(win);
 
   mainWindow = win;
   return win;
 }
+
+ipcMain.on(IPC.SETTINGS_OPEN_WINDOW, () => openSettingsWindow());
 
 // IPC: renderer-side audio frames + commands ──────────────────────────────
 ipcMain.on(IPC.CONV_PTT_PRESS, () => orchestrator?.pttPress());

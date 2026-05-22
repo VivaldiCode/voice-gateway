@@ -25,6 +25,7 @@ const api = {
     set: (patch: SettingsPatch): Promise<Settings> => ipcRenderer.invoke(IPC.SETTINGS_SET, patch),
     reset: (): Promise<Settings> => ipcRenderer.invoke(IPC.SETTINGS_RESET),
     onChange: (cb: (s: Settings) => void): (() => void) => on(IPC.SETTINGS_CHANGED, cb),
+    openWindow: (): void => ipcRenderer.send(IPC.SETTINGS_OPEN_WINDOW),
   },
 
   pair: {
