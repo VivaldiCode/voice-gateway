@@ -17,7 +17,7 @@ import type {
   TtsProvider,
 } from '../../shared/types';
 import { PIPER_VOICES } from '../../shared/piper-voices';
-import type { TtsStatus, VoiceInfo } from '../global';
+import type { SttStatus, TtsStatus, VoiceInfo } from '../global';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 
 type Tab = 'voz' | 'microfone' | 'reconhecimento' | 'ativacao' | 'conexao' | 'avancado';
@@ -639,6 +639,57 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
   );
 }
 
+function WhisperStatusCard({
+  status,
+  model,
+}: {
+  status: SttStatus;
+  model: WhisperModel;
+}): JSX.Element {
+  if (status.state === 'ready') {
+    return (
+      <div className="rounded-xl border border-green-800/60 bg-green-950/30 px-3 py-2 text-xs text-green-200">
+        ✓ Whisper local pronto. Modelo <code>ggml-{model}.bin</code> descarregado.
+        Carrega no botão para falar.
+      </div>
+    );
+  }
+  if (status.state === 'preparing') {
+    const p = status.progress;
+    const pct = p?.fraction != null ? Math.round(p.fraction * 100) : null;
+    const label =
+      p?.stage === 'installing'
+        ? p.detail ?? 'a instalar dependências'
+        : p?.stage === 'downloading'
+          ? `a descarregar ggml-${model}.bin ${p.detail ? `(${p.detail})` : ''}`
+          : 'a preparar reconhecimento';
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-bg-subtle bg-bg/60 px-3 py-2 text-xs text-zinc-300">
+        <div className="flex items-center justify-between">
+          <span>{label}…</span>
+          {pct != null && <span className="font-mono text-accent">{pct}%</span>}
+        </div>
+        <div className="h-1 overflow-hidden rounded-full bg-bg-subtle">
+          <div
+            className="h-full rounded-full bg-accent transition-all"
+            style={{ width: pct != null ? `${pct}%` : '40%' }}
+          />
+        </div>
+      </div>
+    );
+  }
+  if (status.state === 'error') {
+    // CommandHint renders the back-tick `brew install whisper-cpp` as a
+    // copy-able terminal box; users can act on it in one click.
+    return <CommandHint variant="error" message={status.message} />;
+  }
+  return (
+    <div className="rounded-xl border border-bg-subtle bg-bg-panel/60 px-3 py-2 text-xs text-zinc-300">
+      A inicializar…
+    </div>
+  );
+}
+
 function PiperPrepareCard({
   status,
   downloading,
@@ -699,6 +750,12 @@ function ReconhecimentoTab({ settings }: { settings: Settings }): JSX.Element {
   const [model, setModel] = useState<WhisperModel>(settings.stt.whisperLocal.model);
   const [language, setLanguage] = useState<string>(settings.stt.language);
   const [openaiKey, setOpenaiKey] = useState(settings.stt.openai.apiKey);
+  const [sttStatus, setSttStatus] = useState<SttStatus>({ state: 'idle' });
+
+  useEffect(() => {
+    const off = window.vg.stt.onStatus(setSttStatus);
+    return off;
+  }, []);
 
   const persist = useCallback(
     (patch: Partial<Settings['stt']>) => {
@@ -728,6 +785,10 @@ function ReconhecimentoTab({ settings }: { settings: Settings }): JSX.Element {
 
       {provider === 'whisper_local' && (
         <>
+          <Section title="Estado do reconhecimento">
+            <WhisperStatusCard status={sttStatus} model={model} />
+          </Section>
+
           <Section title="Modelo Whisper">
             <select
               value={model}
@@ -752,13 +813,6 @@ function ReconhecimentoTab({ settings }: { settings: Settings }): JSX.Element {
             <p className="text-xs text-zinc-500">
               O modelo é descarregado automaticamente da Hugging Face na primeira vez.
             </p>
-          </Section>
-
-          <Section title="Como instalar Whisper (uma vez)">
-            <CommandHint
-              variant="info"
-              message="O Whisper local precisa do binário whisper-cpp. No macOS: `brew install whisper-cpp`. No Linux: vê em https://github.com/ggerganov/whisper.cpp."
-            />
           </Section>
         </>
       )}

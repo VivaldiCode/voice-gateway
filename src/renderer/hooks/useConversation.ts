@@ -62,7 +62,6 @@ export function useConversation(): ConversationApi {
     };
   }, []);
 
-  const capture = useMemo(() => new AudioCapture(), []);
   const playback = useMemo(() => new AudioPlayback(), []);
 
   useEffect(() => {
@@ -114,40 +113,54 @@ export function useConversation(): ConversationApi {
     };
   }, [playback]);
 
+  // Capture lifecycle: a *fresh* AudioCapture per CAPTURING entry. Sharing
+  // an instance across press/release cycles let leaked listeners fire on
+  // subsequent sessions, and the .then() callback would attach listeners to
+  // an already-stopped capture when start() raced with stop().
   useEffect(() => {
-    if (state === 'CAPTURING') {
-      void capture
-        .start({ deviceId: inputDeviceId ?? null })
-        .then(() => {
-          const offFrame = capture.onFrame((frame) => {
-            const copy = new ArrayBuffer(frame.byteLength);
-            new Uint8Array(copy).set(
-              new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength),
-            );
-            window.vg.conversation.sendAudioFrame(copy);
-          });
-          const offLevel = capture.onLevel((rms) => setLevel(rms));
-          capture.setMuted(false);
-          (capture as unknown as { _off?: () => void })._off = () => {
-            offFrame();
-            offLevel();
-          };
-        })
-        .catch((err: Error) => {
-          setError(`Não consegui aceder ao microfone: ${err.message}`);
-        });
-    } else {
-      const r = capture as unknown as { _off?: () => void };
-      r._off?.();
-      void capture.stop();
+    if (state !== 'CAPTURING') {
       setLevel(0);
+      return;
     }
+
+    let cancelled = false;
+    const cap = new AudioCapture();
+    void cap
+      .start({ deviceId: inputDeviceId ?? null })
+      .then(() => {
+        if (cancelled) {
+          void cap.stop();
+          return;
+        }
+        cap.onFrame((frame) => {
+          const copy = new ArrayBuffer(frame.byteLength);
+          new Uint8Array(copy).set(
+            new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength),
+          );
+          window.vg.conversation.sendAudioFrame(copy);
+        });
+        cap.onLevel((rms) => {
+          if (!cancelled) setLevel(rms);
+        });
+        cap.setMuted(false);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(`Não consegui aceder ao microfone: ${err.message}`);
+      });
+
+    return () => {
+      cancelled = true;
+      void cap.stop();
+    };
+  }, [state, inputDeviceId]);
+
+  useEffect(() => {
     if (state === 'SPEAKING') {
       playback.beginUtterance('pcm16_22050');
     } else if (state === 'IDLE' || state === 'LISTENING_WAKE') {
       playback.endUtterance();
     }
-  }, [state, capture, playback, inputDeviceId]);
+  }, [state, playback]);
 
   return {
     state,
