@@ -81,30 +81,44 @@ export class AudioCapture {
   private listeners = new Set<FrameListener>();
   private levelListeners = new Set<LevelListener>();
   private muted = false;
+  /**
+   * Tracks the currently-running start() call so a concurrent stop() can
+   * abort it cleanly. Without this, a quick press-then-release of the PTT
+   * button races: stop() closes the AudioContext while start() is still
+   * awaiting `audioWorklet.addModule(...)`, and the subsequent
+   * `new AudioWorkletNode(ctx, ...)` throws
+   *   "Failed to construct 'AudioWorkletNode': No execution context available."
+   */
+  private currentStart: AbortController | null = null;
 
   async start(opts: AudioCaptureOptions = {}): Promise<void> {
-    if (this.ctx) return;
+    if (this.ctx || this.currentStart) return;
+    const ac = new AbortController();
+    this.currentStart = ac;
+    const aborted = (): boolean => ac.signal.aborted;
+
+    let stream: MediaStream;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          ...(opts.deviceId ? { deviceId: { exact: opts.deviceId } } : {}),
-          channelCount: AUDIO_CHANNELS,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: false,
-        },
-        video: false,
-      });
-    } catch (err) {
-      // Fall back to the system-default mic if the requested device became
-      // unavailable (e.g. unplugged between enumerate + getUserMedia).
-      if (
-        opts.deviceId &&
-        err instanceof Error &&
-        (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')
-      ) {
-        try {
-          this.stream = await navigator.mediaDevices.getUserMedia({
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...(opts.deviceId ? { deviceId: { exact: opts.deviceId } } : {}),
+            channelCount: AUDIO_CHANNELS,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: false,
+          },
+          video: false,
+        });
+      } catch (err) {
+        // Fall back to the system-default mic if the requested device became
+        // unavailable (e.g. unplugged between enumerate + getUserMedia).
+        if (
+          opts.deviceId &&
+          err instanceof Error &&
+          (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')
+        ) {
+          stream = await navigator.mediaDevices.getUserMedia({
             audio: {
               channelCount: AUDIO_CHANNELS,
               echoCancellation: true,
@@ -113,15 +127,27 @@ export class AudioCapture {
             },
             video: false,
           });
-        } catch (fallbackErr) {
-          throw friendlyAudioError(fallbackErr);
+        } else {
+          throw friendlyAudioError(err);
         }
-      } else {
-        throw friendlyAudioError(err);
       }
+    } catch (err) {
+      this.currentStart = null;
+      throw err instanceof Error && err.message.startsWith('Falha')
+        ? err
+        : friendlyAudioError(err);
     }
+
+    // stop() may have been called while getUserMedia was pending.
+    if (aborted()) {
+      stream.getTracks().forEach((t) => t.stop());
+      this.currentStart = null;
+      return;
+    }
+
     const ctx = new AudioContext();
     this.ctx = ctx;
+    this.stream = stream;
 
     const blob = new Blob([WORKLET_SOURCE], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
@@ -129,6 +155,21 @@ export class AudioCapture {
       await ctx.audioWorklet.addModule(url);
     } finally {
       URL.revokeObjectURL(url);
+    }
+
+    // addModule is the slowest await in the chain; check the abort flag
+    // again — and also the ctx state in case stop() closed it directly.
+    if (aborted() || ctx.state === 'closed') {
+      try {
+        await ctx.close();
+      } catch {
+        // ignore
+      }
+      stream.getTracks().forEach((t) => t.stop());
+      if (this.ctx === ctx) this.ctx = null;
+      if (this.stream === stream) this.stream = null;
+      this.currentStart = null;
+      return;
     }
 
     const node = new AudioWorkletNode(ctx, WORKLET_NAME, {
@@ -157,22 +198,43 @@ export class AudioCapture {
     };
     this.node = node;
 
-    const source = ctx.createMediaStreamSource(this.stream);
+    const source = ctx.createMediaStreamSource(stream);
     this.source = source;
     source.connect(node);
+    this.currentStart = null;
   }
 
   async stop(): Promise<void> {
+    // Cancel any in-flight start() so the next `await` in there bails out
+    // before constructing an AudioWorkletNode against a closed context.
+    this.currentStart?.abort();
+    this.currentStart = null;
+
     this.muted = false;
-    this.source?.disconnect();
-    this.node?.disconnect();
-    this.node?.port.close();
+    try {
+      this.source?.disconnect();
+    } catch {
+      // ignore
+    }
+    try {
+      this.node?.disconnect();
+      this.node?.port.close();
+    } catch {
+      // ignore
+    }
     this.stream?.getTracks().forEach((t) => t.stop());
-    if (this.ctx) await this.ctx.close();
+    const ctx = this.ctx;
     this.ctx = null;
     this.stream = null;
     this.node = null;
     this.source = null;
+    if (ctx && ctx.state !== 'closed') {
+      try {
+        await ctx.close();
+      } catch {
+        // ignore — already closed by something else
+      }
+    }
   }
 
   setMuted(muted: boolean): void {
