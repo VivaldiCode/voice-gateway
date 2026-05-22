@@ -1,0 +1,9 @@
+node_modules
+out
+dist
+release
+coverage
+playwright-report
+test-results
+*.lock
+package-lock.json

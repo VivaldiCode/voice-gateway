@@ -1,0 +1,45 @@
+appId: dev.voicegateway.app
+productName: Voice Gateway
+copyright: Copyright © 2026 Voice Gateway contributors
+asar: true
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources/python
+    to: python
+    filter:
+      - "**/*"
+  - from: resources/piper
+    to: piper
+    filter:
+      - "**/*"
+mac:
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  icon: resources/icons/icon.icns
+linux:
+  target:
+    - AppImage
+    - deb
+  category: AudioVideo
+  icon: resources/icons
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icons/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
