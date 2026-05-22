@@ -17,7 +17,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,html}\" \"tests/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm run build && playwright test",
     "build:mac": "npm run build && electron-builder --mac --arm64",
     "build:linux": "npm run build && electron-builder --linux",
     "build:win": "npm run build && electron-builder --win",
@@ -31,9 +31,11 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.5",
     "class-variance-authority": "^0.7.1",
-    "lucide-react": "^0.469.0"
+    "lucide-react": "^0.469.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.13",
     "@playwright/test": "^1.49.1",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",
