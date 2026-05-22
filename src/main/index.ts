@@ -9,6 +9,7 @@ import { HermesClient } from './services/hermes-client';
 import { createSttAdapter } from './services/stt-service';
 import { createTtsAdapter } from './services/tts-service';
 import { ConversationOrchestrator } from './services/conversation-orchestrator';
+import { WakeWordService } from './services/wake-word-service';
 import { createTray } from './tray';
 import { registerHotkey } from './global-shortcut';
 
@@ -34,6 +35,7 @@ let unregisterHotkey: () => void = () => undefined;
 // Conversation pipeline (built lazily once pairing is present).
 let client: HermesClient | null = null;
 let orchestrator: ConversationOrchestrator | null = null;
+let wake: WakeWordService | null = null;
 
 function send(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
@@ -93,6 +95,33 @@ function rebuildHotkey(): void {
   });
 }
 
+function rebuildWakeWord(): void {
+  wake?.stop();
+  wake = null;
+  const s = settings.get();
+  if (s.activation.mode !== 'WAKE_WORD') return;
+  if (!orchestrator) return;
+  wake = new WakeWordService();
+  wake.on('wake', (model) => {
+    log.info('[VG] wake detected:', model);
+    orchestrator?.wakeDetected();
+  });
+  wake.on('error', (msg) => {
+    log.warn('[VG] wake-word error:', msg);
+    send(IPC.WAKE_STATUS, { running: false, error: msg });
+  });
+  wake.on('ready', (models) => send(IPC.WAKE_STATUS, { running: true, models }));
+  try {
+    wake.start(s.activation.wakeWord, 0.5);
+  } catch (err) {
+    log.warn('[VG] wake-word failed to start:', err);
+    send(IPC.WAKE_STATUS, {
+      running: false,
+      error: 'Não consegui iniciar o detector. Verifica se tens o python3 e openwakeword instalados.',
+    });
+  }
+}
+
 function createMainWindow(): BrowserWindow {
   mainWindow?.close();
   const win = new BrowserWindow({
@@ -140,6 +169,7 @@ settings.onChange((next) => {
   // Rebuild the pipeline when pairing changes.
   if (next.pairing) bootstrapConversation();
   rebuildHotkey();
+  rebuildWakeWord();
 });
 
 app.whenReady().then(() => {
@@ -148,6 +178,7 @@ app.whenReady().then(() => {
   void tray; // suppress unused warning until extended
   bootstrapConversation();
   rebuildHotkey();
+  rebuildWakeWord();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -164,5 +195,6 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   unregisterHotkey();
+  wake?.stop();
   client?.disconnect();
 });
