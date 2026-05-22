@@ -10,7 +10,7 @@ Schema:
     token = "<base64url 32-byte secret>"
 
     [hermes]
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8642"
     request_timeout = 30
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ class BridgeConfig:
             host=bridge.get("host", "0.0.0.0"),
             port=int(bridge.get("port", 8765)),
             token=str(token),
-            hermes_base_url=str(hermes.get("base_url", "http://localhost:8000")),
+            hermes_base_url=str(hermes.get("base_url", "http://localhost:8642")),
             hermes_request_timeout=int(hermes.get("request_timeout", 30)),
         )
 

@@ -53,7 +53,7 @@ Usage:
 Options:
   --yes, -y               Skip interactive prompts (use defaults / env vars).
   --port PORT             Bridge listen port (default 8765).
-  --hermes-url URL        Local Hermes API base URL (default http://localhost:8000).
+  --hermes-url URL        Local Hermes API base URL (default http://localhost:8642).
   --help, -h              Show this help.
 
 Environment overrides:
@@ -221,7 +221,7 @@ ensure_python_venv_ready() {
 
 # ---------- args / prompts ----------
 DEFAULT_BRIDGE_PORT=8765
-DEFAULT_HERMES_URL="http://localhost:8000"
+DEFAULT_HERMES_URL="http://localhost:8642"
 
 BRIDGE_PORT="${BRIDGE_PORT:-$DEFAULT_BRIDGE_PORT}"
 HERMES_URL="${HERMES_URL:-$DEFAULT_HERMES_URL}"

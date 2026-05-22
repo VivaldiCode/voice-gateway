@@ -77,7 +77,7 @@ def test_config_defaults() -> None:
     cfg = BridgeConfig.from_dict({"bridge": {"token": "x"}})
     assert cfg.host == "0.0.0.0"
     assert cfg.port == 8765
-    assert cfg.hermes_base_url == "http://localhost:8000"
+    assert cfg.hermes_base_url == "http://localhost:8642"
 
 
 # ---------- server ----------

@@ -50,7 +50,7 @@ port = 8765
 token = "dev-token-please-change-me"
 
 [hermes]
-base_url = "http://localhost:8000"
+base_url = "http://localhost:8642"
 request_timeout = 30
 ```
 

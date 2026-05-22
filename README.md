@@ -23,7 +23,7 @@ Talk to your self-hosted [Hermes agent](https://hermes-agent.nousresearch.com/) 
 curl -fsSL https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh | bash
 ```
 
-The script is interactive: it prompts for the bridge port (default `8765`) and your local Hermes API URL (default `http://localhost:8000`). At the end it prints a one-line **pairing token** — keep it handy.
+The script is interactive: it prompts for the bridge port (default `8765`) and your local Hermes API URL (default `http://localhost:8642`, [Hermes' documented default port](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server)). At the end it prints a one-line **pairing token** — keep it handy.
 
 ### 2. Install the desktop app
 

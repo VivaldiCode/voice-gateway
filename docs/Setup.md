@@ -7,7 +7,7 @@ End-to-end installation, from a fresh Hermes server to a working voice conversat
 **Server (Linux):**
 - `python3` ≥ 3.10 with the `venv` module (`apt install python3-venv` on Debian/Ubuntu)
 - `systemd` (any mainstream distro from the last decade)
-- The Hermes agent reachable on a local HTTP port (default `http://localhost:8000`)
+- The Hermes agent reachable on a local HTTP port (default `http://localhost:8642` — see [Hermes API server docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server))
 - Root or sudo
 
 **Desktop (macOS / Linux / Windows):**
