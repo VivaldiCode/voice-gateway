@@ -39,33 +39,85 @@ warn()  { printf "${YELLOW}!${RESET} %s\n" "$1"; }
 fail()  { printf "${RED}✗${RESET} %s\n" "$1" >&2; exit 1; }
 note()  { printf "${DIM}%s${RESET}\n" "$1"; }
 
+# Show --help / -h immediately — works on any OS, without root.
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h)
+      cat <<'EOF'
+Voice Gateway — Hermes Voice Bridge installer.
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh | bash
+  sudo bash install.sh [--yes] [--port PORT] [--hermes-url URL]
+
+Options:
+  --yes, -y               Skip interactive prompts (use defaults / env vars).
+  --port PORT             Bridge listen port (default 8765).
+  --hermes-url URL        Local Hermes API base URL (default http://localhost:8000).
+  --help, -h              Show this help.
+
+Environment overrides:
+  BRIDGE_PORT, HERMES_URL, ASSUME_YES, INSTALL_SCRIPT_URL.
+EOF
+      exit 0
+      ;;
+  esac
+done
+
 # ---------- preflight ----------
 if [[ "$(uname -s)" != "Linux" ]]; then
   fail "This installer supports Linux only. On macOS run hermes-voice-bridge in a development venv (see server/hermes-voice-bridge/README.md)."
 fi
 
+# ---------- privilege escalation ----------
+#
+# Three valid entry points, all of which must work:
+#
+#   (a) sudo bash server/install.sh           — running as root from a clone
+#   (b) bash server/install.sh                — running as user from a clone
+#   (c) curl -fsSL <url> | bash               — running as user, piped via curl
+#
+# In (b) we re-exec via `sudo bash "$0"`; in (c) `$0` is literally "bash"
+# (the shell binary), so `sudo bash "$0"` would try to run the bash ELF as
+# a script and fail with "cannot execute binary file". The fix: detect the
+# piped case, download a fresh copy to /tmp, then sudo-exec that file
+# with the original argv preserved.
+escalate_via_tempfile() {
+  if ! command -v curl >/dev/null 2>&1; then
+    fail "Piped install detected but 'curl' is missing — install curl and retry, or download the script first."
+  fi
+  local tmp
+  tmp="$(mktemp -t vg-install.XXXXXX 2>/dev/null || mktemp /tmp/vg-install.XXXXXX)"
+  if ! curl -fsSL "${INSTALL_SCRIPT_URL}" -o "${tmp}"; then
+    rm -f "${tmp}"
+    fail "Could not re-download installer from ${INSTALL_SCRIPT_URL}"
+  fi
+  chmod 0700 "${tmp}"
+  warn "elevating privileges — sudo will ask for your password if needed"
+  exec sudo -E bash "${tmp}" "$@"
+}
+
 if [[ $EUID -ne 0 ]]; then
   if ! command -v sudo >/dev/null 2>&1; then
-    fail "Root privileges required (no sudo found)."
+    fail "Root privileges required and no 'sudo' on PATH. Re-run as root:  su -c 'bash install.sh'"
   fi
-  # When invoked via `curl ... | bash`, $0 is literally "bash" (or the path
-  # of the shell), not a script file. `exec sudo -E bash "$0"` would then
-  # try to execute the bash binary as a script and fail with
-  # "cannot execute binary file". Detect that case and re-fetch ourselves
-  # over the wire instead of trying to re-exec a missing file.
-  if [[ -f "$0" ]] && [[ -r "$0" ]] && [[ "$(basename "$0")" != "bash" ]]; then
+  if [[ -f "$0" ]] && [[ -r "$0" ]] && [[ "$(basename -- "$0")" != "bash" ]]; then
+    # Case (b): real script file on disk — just sudo-re-exec it.
     exec sudo -E bash "$0" "$@"
   fi
-  if ! command -v curl >/dev/null 2>&1; then
-    fail "Detected a piped install but curl is missing — install curl and retry, or download the script first."
-  fi
-  warn "re-fetching installer under sudo (piped install detected)"
-  exec sudo -E env "INSTALL_SCRIPT_URL=${INSTALL_SCRIPT_URL}" bash -c \
-    "bash <(curl -fsSL \"\$INSTALL_SCRIPT_URL\") $(printf '%q ' "$@")"
+  # Case (c): piped install — fetch a temp copy and sudo-exec that.
+  escalate_via_tempfile "$@"
 fi
 
+# ---------- now running as root ----------
 if ! command -v systemctl >/dev/null 2>&1; then
   fail "systemd is required. (Found no 'systemctl' in PATH.)"
+fi
+
+# If we were re-exec'd from a /tmp copy, self-delete on exit so we leave
+# nothing behind.
+if [[ "$(dirname -- "$0")" == "/tmp" ]] && [[ "$(basename -- "$0")" == vg-install.* ]]; then
+  trap 'rm -f -- "$0"' EXIT
 fi
 
 check_python() {
@@ -92,11 +144,16 @@ ASSUME_YES="${ASSUME_YES:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes|-y) ASSUME_YES=1; shift;;
-    --port) BRIDGE_PORT="$2"; shift 2;;
-    --hermes-url) HERMES_URL="$2"; shift 2;;
+    --port)
+      [[ $# -ge 2 ]] || fail "--port requires a value"
+      BRIDGE_PORT="$2"; shift 2;;
+    --hermes-url)
+      [[ $# -ge 2 ]] || fail "--hermes-url requires a value"
+      HERMES_URL="$2"; shift 2;;
     --help|-h)
-      sed -n '1,30p' "$0"
-      exit 0;;
+      # Handled earlier (before sudo). Safe to ignore here.
+      shift;;
+    "") shift;;   # tolerate stray empty arg from over-quoted re-exec
     *) fail "Unknown argument: $1";;
   esac
 done
