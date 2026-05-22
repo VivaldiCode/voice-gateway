@@ -1,0 +1,567 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Volume2, Mic2, Cable, Sliders, AlertTriangle, RefreshCw, Loader2, Play } from 'lucide-react';
+import { Button } from './Button';
+import { CommandHint } from './CommandHint';
+import { cn } from '../lib/cn';
+import {
+  SUPPORTED_WAKE_WORDS,
+  SUPPORTED_WHISPER_MODELS,
+  type WakeWord,
+  type WhisperModel,
+} from '../../shared/constants';
+import type {
+  ActivationMode,
+  ElevenLabsConfig,
+  Settings,
+  SttProvider,
+  TtsProvider,
+} from '../../shared/types';
+import type { VoiceInfo } from '../global';
+import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
+
+type Tab = 'voz' | 'reconhecimento' | 'ativacao' | 'conexao' | 'avancado';
+
+export interface SettingsPanelProps {
+  settings: Settings;
+  onClose: () => void;
+  onRePair: () => void;
+}
+
+const TABS: { id: Tab; label: string; icon: typeof Volume2 }[] = [
+  { id: 'voz', label: 'Voz', icon: Volume2 },
+  { id: 'reconhecimento', label: 'Reconhecimento', icon: Mic2 },
+  { id: 'ativacao', label: 'Ativação', icon: Sliders },
+  { id: 'conexao', label: 'Conexão', icon: Cable },
+  { id: 'avancado', label: 'Avançado', icon: AlertTriangle },
+];
+
+export function SettingsPanel({ settings, onClose, onRePair }: SettingsPanelProps): JSX.Element {
+  const [tab, setTab] = useState<Tab>('voz');
+  return (
+    <div
+      role="dialog"
+      aria-label="Definições"
+      className="fixed inset-0 z-30 flex items-stretch justify-end bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex h-full w-full max-w-md flex-col border-l border-bg-subtle bg-bg-panel shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="vg-drag flex items-center justify-between border-b border-bg-subtle px-5 py-4">
+          <h2 className="text-lg font-semibold">Definições</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
+            aria-label="Fechar"
+          >
+            fechar
+          </button>
+        </header>
+        <nav
+          className="flex shrink-0 gap-1 overflow-x-auto border-b border-bg-subtle px-3 py-2 text-xs"
+        >
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={cn(
+                'flex items-center gap-2 rounded px-3 py-2 transition',
+                tab === id ? 'bg-bg-subtle text-white' : 'text-zinc-400 hover:text-white',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <main className="flex-1 overflow-y-auto px-5 py-4">
+          {tab === 'voz' && <VozTab settings={settings} />}
+          {tab === 'reconhecimento' && <ReconhecimentoTab settings={settings} />}
+          {tab === 'ativacao' && <AtivacaoTab settings={settings} />}
+          {tab === 'conexao' && <ConexaoTab settings={settings} onRePair={onRePair} />}
+          {tab === 'avancado' && <AvancadoTab />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ───────── Voz ─────────
+
+function VozTab({ settings }: { settings: Settings }): JSX.Element {
+  const [provider, setProvider] = useState<TtsProvider>(settings.tts.provider);
+  const [elKey, setElKey] = useState(settings.tts.elevenlabs.apiKey);
+  const [voices, setVoices] = useState<VoiceInfo[]>([]);
+  const [voiceId, setVoiceId] = useState(settings.tts.elevenlabs.voiceId);
+  const [loadingVoices, setLoadingVoices] = useState(false);
+  const [voicesError, setVoicesError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  type TtsPatch = {
+    provider?: TtsProvider;
+    elevenlabs?: Partial<ElevenLabsConfig>;
+  };
+  const persist = useCallback(
+    (patch: TtsPatch) => {
+      void window.vg.settings.set({
+        tts: {
+          ...settings.tts,
+          ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
+          elevenlabs: { ...settings.tts.elevenlabs, ...(patch.elevenlabs ?? {}) },
+        },
+      });
+    },
+    [settings.tts],
+  );
+
+  const loadVoices = useCallback(async () => {
+    if (!elKey.trim()) {
+      setVoicesError('Adiciona a chave API primeiro.');
+      return;
+    }
+    setLoadingVoices(true);
+    setVoicesError(null);
+    try {
+      const r = await window.vg.tts.listVoices({ provider: 'elevenlabs', apiKey: elKey });
+      if (!r.ok) {
+        setVoicesError(r.message ?? 'Não consegui obter as vozes.');
+        setVoices([]);
+        return;
+      }
+      setVoices(r.voices);
+      if (!voiceId && r.voices[0]) {
+        setVoiceId(r.voices[0].id);
+      }
+    } finally {
+      setLoadingVoices(false);
+    }
+  }, [elKey, voiceId]);
+
+  const testPlayback = useMemo(() => new AudioPlayback(), []);
+  useEffect(() => () => void testPlayback.dispose(), [testPlayback]);
+
+  useEffect(() => {
+    const off = window.vg.tts.onTestChunk((c) => {
+      if (c.done) {
+        testPlayback.endUtterance();
+        return;
+      }
+      const bytes = base64ToBytes(c.data);
+      testPlayback.pushChunk(bytes, c.format as PlaybackFormat);
+    });
+    return off;
+  }, [testPlayback]);
+
+  const onTest = useCallback(async () => {
+    setTesting(true);
+    setTestError(null);
+    testPlayback.beginUtterance('mp3');
+    try {
+      const r = await window.vg.tts.test({
+        provider,
+        text: 'Olá, eu sou o Hermes. Que bom ouvir-te.',
+        elevenlabs:
+          provider === 'elevenlabs'
+            ? { ...settings.tts.elevenlabs, apiKey: elKey, voiceId }
+            : undefined,
+      });
+      if (!r.ok) setTestError(r.message ?? 'Falhou.');
+    } finally {
+      setTesting(false);
+    }
+  }, [provider, elKey, voiceId, settings.tts.elevenlabs, testPlayback]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Section title="Como queres ouvir o Hermes">
+        <ProviderToggle
+          options={[
+            { id: 'piper_local', label: 'Piper (local, grátis)', sub: 'qualidade simples, funciona offline' },
+            { id: 'elevenlabs', label: 'ElevenLabs (cloud)', sub: 'voz muito natural, requer chave' },
+          ]}
+          value={provider}
+          onChange={(v) => {
+            const p = v as TtsProvider;
+            setProvider(p);
+            persist({ provider: p });
+          }}
+        />
+      </Section>
+
+      {provider === 'elevenlabs' && (
+        <>
+          <Section title="Chave API da ElevenLabs">
+            <input
+              type="password"
+              value={elKey}
+              onChange={(e) => setElKey(e.target.value)}
+              onBlur={() => persist({ elevenlabs: { apiKey: elKey } })}
+              placeholder="sk_..."
+              aria-label="Chave API"
+              className="h-10 w-full select-text rounded-xl border border-bg-subtle bg-bg px-3 font-mono text-xs text-white outline-none focus:border-accent focus:ring-2 focus:ring-accent/40"
+            />
+            <p className="text-xs text-zinc-500">
+              A chave fica gravada localmente.{' '}
+              <a
+                href="https://elevenlabs.io/app/settings/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline"
+              >
+                Cria uma aqui →
+              </a>
+            </p>
+          </Section>
+
+          <Section title="Voz">
+            <div className="flex gap-2">
+              <select
+                value={voiceId}
+                onChange={(e) => {
+                  setVoiceId(e.target.value);
+                  persist({ elevenlabs: { voiceId: e.target.value } });
+                }}
+                className="h-10 flex-1 rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+              >
+                {voices.length === 0 && <option value="">(carrega as vozes)</option>}
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                    {v.language ? ` — ${v.language}` : ''}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={loadVoices}
+                loading={loadingVoices}
+                aria-label="Recarregar vozes"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+            {voicesError && <CommandHint message={voicesError} variant="error" />}
+          </Section>
+        </>
+      )}
+
+      <Section title="Testar voz">
+        <div className="flex items-center gap-2">
+          <Button onClick={onTest} loading={testing} size="md">
+            <Play className="mr-1 h-4 w-4" />
+            {testing ? 'a sintetizar…' : 'Reproduzir amostra'}
+          </Button>
+          <span className="text-xs text-zinc-500">&ldquo;Olá, eu sou o Hermes…&rdquo;</span>
+        </div>
+        {testError && <CommandHint message={testError} variant="error" />}
+      </Section>
+    </div>
+  );
+}
+
+// ───────── Reconhecimento (STT) ─────────
+
+function ReconhecimentoTab({ settings }: { settings: Settings }): JSX.Element {
+  const [provider, setProvider] = useState<SttProvider>(settings.stt.provider);
+  const [model, setModel] = useState<WhisperModel>(settings.stt.whisperLocal.model);
+  const [language, setLanguage] = useState<string>(settings.stt.language);
+  const [openaiKey, setOpenaiKey] = useState(settings.stt.openai.apiKey);
+
+  const persist = useCallback(
+    (patch: Partial<Settings['stt']>) => {
+      void window.vg.settings.set({
+        stt: { ...settings.stt, ...patch } as Settings['stt'],
+      });
+    },
+    [settings.stt],
+  );
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Section title="Como queres que o Hermes te ouça">
+        <ProviderToggle
+          options={[
+            { id: 'whisper_local', label: 'Whisper local (grátis)', sub: 'corre 100% no teu Mac' },
+            { id: 'openai_whisper', label: 'OpenAI Whisper API', sub: 'sem instalar nada, requer chave' },
+          ]}
+          value={provider}
+          onChange={(v) => {
+            const p = v as SttProvider;
+            setProvider(p);
+            persist({ provider: p });
+          }}
+        />
+      </Section>
+
+      {provider === 'whisper_local' && (
+        <>
+          <Section title="Modelo Whisper">
+            <select
+              value={model}
+              onChange={(e) => {
+                const m = e.target.value as WhisperModel;
+                setModel(m);
+                persist({ whisperLocal: { model: m } });
+              }}
+              className="h-10 w-full rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+            >
+              {SUPPORTED_WHISPER_MODELS.map((m) => (
+                <option key={m} value={m}>
+                  {m}{' '}
+                  {m === 'tiny'
+                    ? '(~75 MB, mais rápido)'
+                    : m === 'base'
+                      ? '(~150 MB, recomendado)'
+                      : '(~480 MB, mais preciso)'}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-zinc-500">
+              O modelo é descarregado automaticamente da Hugging Face na primeira vez.
+            </p>
+          </Section>
+
+          <Section title="Como instalar Whisper (uma vez)">
+            <CommandHint
+              variant="info"
+              message="O Whisper local precisa do binário whisper-cpp. No macOS: `brew install whisper-cpp`. No Linux: vê em https://github.com/ggerganov/whisper.cpp."
+            />
+          </Section>
+        </>
+      )}
+
+      {provider === 'openai_whisper' && (
+        <Section title="Chave API da OpenAI">
+          <input
+            type="password"
+            value={openaiKey}
+            onChange={(e) => setOpenaiKey(e.target.value)}
+            onBlur={() => persist({ openai: { ...settings.stt.openai, apiKey: openaiKey } })}
+            placeholder="sk-..."
+            aria-label="Chave API OpenAI"
+            className="h-10 w-full select-text rounded-xl border border-bg-subtle bg-bg px-3 font-mono text-xs text-white outline-none focus:border-accent focus:ring-2 focus:ring-accent/40"
+          />
+          <p className="text-xs text-zinc-500">
+            <a
+              href="https://platform.openai.com/api-keys"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent hover:underline"
+            >
+              Cria uma chave aqui →
+            </a>
+          </p>
+        </Section>
+      )}
+
+      <Section title="Idioma">
+        <select
+          value={language}
+          onChange={(e) => {
+            setLanguage(e.target.value);
+            persist({ language: e.target.value as 'pt' | 'en' | 'auto' });
+          }}
+          className="h-10 w-full rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+        >
+          <option value="auto">Detetar automaticamente</option>
+          <option value="pt">Português</option>
+          <option value="en">English</option>
+        </select>
+      </Section>
+    </div>
+  );
+}
+
+// ───────── Ativação ─────────
+
+function AtivacaoTab({ settings }: { settings: Settings }): JSX.Element {
+  const [mode, setMode] = useState<ActivationMode>(settings.activation.mode);
+  const [wakeWord, setWakeWord] = useState<WakeWord>(settings.activation.wakeWord);
+  const [hotkey, setHotkey] = useState(settings.activation.globalHotkey);
+
+  const persist = useCallback(
+    (patch: Partial<Settings['activation']>) => {
+      void window.vg.settings.set({
+        activation: { ...settings.activation, ...patch } as Settings['activation'],
+      });
+    },
+    [settings.activation],
+  );
+
+  return (
+    <div className="flex flex-col gap-5">
+      <Section title="Modo de ativação">
+        <ProviderToggle
+          options={[
+            { id: 'PUSH_TO_TALK', label: 'Botão para falar', sub: 'só ouve quando carregas' },
+            { id: 'WAKE_WORD', label: 'Sempre à escuta', sub: 'palavra-chave (Hey Jarvis…)' },
+          ]}
+          value={mode}
+          onChange={(v) => {
+            const m = v as ActivationMode;
+            setMode(m);
+            persist({ mode: m });
+          }}
+        />
+      </Section>
+
+      {mode === 'WAKE_WORD' && (
+        <Section title="Palavra de ativação">
+          <select
+            value={wakeWord}
+            onChange={(e) => {
+              const w = e.target.value as WakeWord;
+              setWakeWord(w);
+              persist({ wakeWord: w });
+            }}
+            className="h-10 w-full rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+          >
+            {SUPPORTED_WAKE_WORDS.map((w) => (
+              <option key={w} value={w}>
+                {w.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </select>
+        </Section>
+      )}
+
+      <Section title="Atalho global">
+        <input
+          type="text"
+          value={hotkey}
+          onChange={(e) => setHotkey(e.target.value)}
+          onBlur={() => persist({ globalHotkey: hotkey })}
+          aria-label="Atalho global"
+          className="h-10 w-full select-text rounded-xl border border-bg-subtle bg-bg px-3 font-mono text-xs text-white focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
+        />
+        <p className="text-xs text-zinc-500">
+          Formato Electron, ex: <code className="select-all rounded bg-black/40 px-1">CommandOrControl+Shift+H</code>.
+          Aplica-se ao guardar (perde foco).
+        </p>
+      </Section>
+    </div>
+  );
+}
+
+// ───────── Conexão ─────────
+
+function ConexaoTab({
+  settings,
+  onRePair,
+}: {
+  settings: Settings;
+  onRePair: () => void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-5">
+      <Section title="Bridge actual">
+        <p className="font-mono text-xs text-zinc-300">{settings.pairing?.url ?? '(sem pairing)'}</p>
+        <p className="break-all font-mono text-[10px] text-zinc-500">
+          token: {settings.pairing?.token?.slice(0, 8)}…{settings.pairing?.token?.slice(-4)}
+        </p>
+      </Section>
+      <Section title="Re-emparelhar">
+        <p className="text-xs text-zinc-500">
+          Apaga a pairing actual e reabre o assistente de configuração.
+        </p>
+        <Button variant="secondary" onClick={onRePair}>
+          Re-emparelhar agora
+        </Button>
+      </Section>
+    </div>
+  );
+}
+
+// ───────── Avançado ─────────
+
+function AvancadoTab(): JSX.Element {
+  const [confirming, setConfirming] = useState(false);
+  const onReset = useCallback(async () => {
+    await window.vg.settings.reset();
+    setConfirming(false);
+    // Force a reload so the wizard appears.
+    location.reload();
+  }, []);
+  return (
+    <div className="flex flex-col gap-5">
+      <Section title="Factory reset">
+        <p className="text-xs text-zinc-500">
+          Apaga todas as definições (pairing, chaves API, vozes) e volta ao estado inicial.
+        </p>
+        {!confirming ? (
+          <Button variant="danger" onClick={() => setConfirming(true)}>
+            Apagar tudo
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button variant="danger" onClick={onReset}>
+              Sim, apagar
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>
+              Cancelar
+            </Button>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+// ───────── primitives ─────────
+
+function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function ProviderToggle<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { id: T; label: string; sub?: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}): JSX.Element {
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={value === o.id}
+          className={cn(
+            'flex flex-col gap-1 rounded-xl border bg-bg p-3 text-left transition',
+            value === o.id
+              ? 'border-accent ring-2 ring-accent/30'
+              : 'border-bg-subtle hover:border-zinc-600',
+          )}
+        >
+          <span className="text-sm font-medium text-white">{o.label}</span>
+          {o.sub && <span className="text-xs text-zinc-400">{o.sub}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function base64ToBytes(s: string): Uint8Array {
+  const bin = atob(s);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+export function _unused_loader(): typeof Loader2 {
+  return Loader2;
+}

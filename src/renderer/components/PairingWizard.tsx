@@ -62,7 +62,7 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
 
   return (
     <div className="flex h-full w-full flex-col bg-bg">
-      <div className="flex items-center justify-center px-8 pt-6">
+      <div className="vg-drag flex items-center justify-center px-8 pt-9 pb-2">
         <Logo size={36} wordmark tagline="setup inicial" />
       </div>
       <Stepper current={step} />

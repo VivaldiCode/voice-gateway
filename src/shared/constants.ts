@@ -74,6 +74,9 @@ export const IPC = {
   STT_PROGRESS: 'vg:stt:progress',
   STT_STATUS: 'vg:stt:status',
   TTS_PROGRESS: 'vg:tts:progress',
+  TTS_LIST_VOICES: 'vg:tts:list-voices',
+  TTS_TEST: 'vg:tts:test',
+  AUDIO_TEST_TTS_CHUNK: 'vg:audio:test-tts-chunk',
   LOG: 'vg:log',
 } as const;
 

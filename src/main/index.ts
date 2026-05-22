@@ -14,6 +14,9 @@ import type { SttAdapter, ProgressEvent as SttProgress } from './services/stt-se
 import { createTray } from './tray';
 import { registerHotkey } from './global-shortcut';
 import { resolveResource } from './asset-paths';
+import { ensureUserShellPath } from './path-fix';
+
+ensureUserShellPath();
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -214,9 +217,16 @@ ipcMain.on(IPC.CONV_CANCEL, () => orchestrator?.cancel());
 ipcMain.on(IPC.CONV_BARGE_IN, () => orchestrator?.bargeIn());
 ipcMain.on(IPC.CONV_RESET, () => orchestrator?.reset());
 
+let lastSettingsSnapshot = JSON.stringify(settings.get());
 settings.onChange((next) => {
-  // Rebuild the pipeline when pairing changes.
-  if (next.pairing) bootstrapConversation();
+  // Rebuild the pipeline when pairing OR STT/TTS provider configuration
+  // changes — otherwise the user can switch from Piper to ElevenLabs in
+  // settings and the conversation keeps using the stale Piper adapter.
+  const snap = JSON.stringify({ stt: next.stt, tts: next.tts, pairing: next.pairing });
+  if (next.pairing && snap !== lastSettingsSnapshot) {
+    bootstrapConversation();
+  }
+  lastSettingsSnapshot = snap;
   rebuildHotkey();
   rebuildWakeWord();
 });

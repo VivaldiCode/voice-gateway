@@ -1,6 +1,7 @@
 import { Settings as SettingsIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
+import { CommandHint } from './CommandHint';
 import { Logo } from './Logo';
 import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
@@ -26,7 +27,11 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-2 px-5 pt-4 pb-2">
+      {/* macOS hiddenInset traffic lights live at top-left of the window.
+          The `vg-drag` region also makes the header act as a window drag handle. */}
+      <header
+        className="vg-drag flex items-center justify-between gap-2 pr-3 pl-[88px] pt-4 pb-2 [&_button]:vg-no-drag"
+      >
         <Logo size={28} wordmark />
         <Button
           variant="ghost"
@@ -65,14 +70,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         />
         <TranscriptView lines={conv.transcript.slice(-10)} />
         <SttStatusBanner status={conv.sttStatus} />
-        {conv.error && (
-          <p
-            role="alert"
-            className="max-w-md rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-xs text-red-200"
-          >
-            {conv.error}
-          </p>
-        )}
+        {conv.error && <CommandHint message={conv.error} variant="error" />}
       </main>
     </div>
   );
@@ -110,14 +108,9 @@ function SttStatusBanner({ status }: { status: SttStatus }): JSX.Element | null 
     );
   }
 
-  // error
   return (
-    <div
-      role="alert"
-      className="max-w-md rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-xs text-red-200"
-      data-testid="stt-error"
-    >
-      {status.message}
+    <div data-testid="stt-error" className="w-full max-w-md">
+      <CommandHint message={status.message} variant="error" />
     </div>
   );
 }

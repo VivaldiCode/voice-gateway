@@ -1,4 +1,12 @@
-import type { PairingInfo, Settings } from '../shared/types';
+import type { ElevenLabsConfig, PairingInfo, Settings } from '../shared/types';
+
+export interface VoiceInfo {
+  id: string;
+  name: string;
+  language?: string;
+  description?: string;
+  preview_url?: string;
+}
 
 interface PairResult {
   ok: boolean;
@@ -56,6 +64,20 @@ interface VgApi {
   };
   stt: {
     onStatus: (cb: (s: SttStatus) => void) => () => void;
+  };
+  tts: {
+    listVoices: (req: {
+      provider: 'elevenlabs';
+      apiKey: string;
+    }) => Promise<{ ok: boolean; voices: VoiceInfo[]; message?: string }>;
+    test: (req: {
+      provider: 'piper_local' | 'elevenlabs';
+      text: string;
+      elevenlabs?: ElevenLabsConfig;
+    }) => Promise<{ ok: boolean; message?: string }>;
+    onTestChunk: (
+      cb: (c: { seq: number; format: string; data: string; done?: boolean }) => void,
+    ) => () => void;
   };
 }
 

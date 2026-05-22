@@ -2,10 +2,11 @@ import { ipcMain, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import WebSocket from 'ws';
 import { CLIENT_VERSION, IPC } from '@shared/constants';
-import type { PairingInfo, Settings } from '@shared/types';
+import type { ElevenLabsConfig, PairingInfo, Settings } from '@shared/types';
 import { parseServerMessage } from '@shared/protocol';
 import { normalizeBridgeUrl } from '@shared/url-utils';
 import type { SettingsStore } from './services/settings-store';
+import { ElevenLabsAdapter, PiperAdapter, type TtsAdapter } from './services/tts-service';
 
 export interface PairTestResult {
   ok: boolean;
@@ -156,6 +157,136 @@ function friendlyConnectError(raw: string): string {
   return 'Não consegui ligar ao Hermes.';
 }
 
+export interface VoiceInfo {
+  id: string;
+  name: string;
+  language?: string;
+  description?: string;
+  preview_url?: string;
+}
+
+export interface ListVoicesRequest {
+  provider: 'elevenlabs';
+  apiKey: string;
+}
+
+/**
+ * Fetch ElevenLabs voice catalogue. Returns a friendly Portuguese error
+ * message on auth failure instead of throwing.
+ */
+export async function listElevenLabsVoices(
+  apiKey: string,
+): Promise<{ ok: boolean; voices: VoiceInfo[]; message?: string }> {
+  if (!apiKey.trim()) {
+    return { ok: false, voices: [], message: 'Falta a chave API da ElevenLabs.' };
+  }
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+      headers: { 'xi-api-key': apiKey.trim() },
+    });
+    if (res.status === 401) {
+      return { ok: false, voices: [], message: 'A chave da ElevenLabs foi rejeitada (401).' };
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return {
+        ok: false,
+        voices: [],
+        message: `A ElevenLabs respondeu HTTP ${res.status}: ${body.slice(0, 120)}`,
+      };
+    }
+    const json = (await res.json()) as { voices?: Array<Record<string, unknown>> };
+    const voices: VoiceInfo[] = Array.isArray(json.voices)
+      ? json.voices
+          .map((v) => {
+            const id = typeof v['voice_id'] === 'string' ? v['voice_id'] : '';
+            const name = typeof v['name'] === 'string' ? v['name'] : id;
+            const labels = (v['labels'] as Record<string, unknown> | undefined) ?? {};
+            const language =
+              typeof labels['language'] === 'string'
+                ? (labels['language'] as string)
+                : typeof labels['accent'] === 'string'
+                  ? (labels['accent'] as string)
+                  : undefined;
+            const description =
+              typeof v['description'] === 'string' ? (v['description'] as string) : undefined;
+            const preview =
+              typeof v['preview_url'] === 'string' ? (v['preview_url'] as string) : undefined;
+            const out: VoiceInfo = { id, name };
+            if (language) out.language = language;
+            if (description) out.description = description;
+            if (preview) out.preview_url = preview;
+            return out;
+          })
+          .filter((v) => v.id)
+      : [];
+    return { ok: true, voices };
+  } catch (err) {
+    log.warn('[VG] list voices error', err);
+    return {
+      ok: false,
+      voices: [],
+      message: 'Não consegui contactar a ElevenLabs. Verifica a tua ligação à internet.',
+    };
+  }
+}
+
+export interface TestVoiceRequest {
+  provider: 'piper_local' | 'elevenlabs';
+  text: string;
+  elevenlabs?: ElevenLabsConfig;
+}
+
+export type TestTtsChunkPayload = {
+  seq: number;
+  format: string;
+  data: string;
+  done?: boolean;
+};
+
+/**
+ * Run a one-shot TTS synthesis without going through the conversation
+ * pipeline. Pushes audio chunks back to the renderer via a dedicated IPC
+ * channel so the existing playback layer can be reused.
+ */
+export async function testVoice(
+  req: TestVoiceRequest,
+  onChunk: (c: TestTtsChunkPayload) => void,
+): Promise<{ ok: boolean; message?: string }> {
+  let adapter: TtsAdapter;
+  if (req.provider === 'elevenlabs') {
+    if (!req.elevenlabs?.apiKey || !req.elevenlabs?.voiceId) {
+      return { ok: false, message: 'Falta a chave API ou a voz.' };
+    }
+    adapter = new ElevenLabsAdapter({ config: req.elevenlabs });
+  } else {
+    adapter = new PiperAdapter({ config: { modelId: 'en_US-lessac-medium' } });
+  }
+  return await new Promise<{ ok: boolean; message?: string }>((resolve) => {
+    let settled = false;
+    const settle = (r: { ok: boolean; message?: string }): void => {
+      if (settled) return;
+      settled = true;
+      adapter.off('chunk', onChunkInternal);
+      adapter.off('end', onEnd);
+      adapter.off('error', onError);
+      resolve(r);
+    };
+    const onChunkInternal = (c: { data: Buffer; format: string; seq: number }): void => {
+      onChunk({ seq: c.seq, format: c.format, data: c.data.toString('base64') });
+    };
+    const onEnd = (): void => {
+      onChunk({ seq: -1, format: '', data: '', done: true });
+      settle({ ok: true });
+    };
+    const onError = (err: Error): void => settle({ ok: false, message: err.message });
+    adapter.on('chunk', onChunkInternal);
+    adapter.on('end', onEnd);
+    adapter.on('error', onError);
+    adapter.speak(req.text).catch((err: Error) => settle({ ok: false, message: err.message }));
+  });
+}
+
 export function registerIpcHandlers(
   settings: SettingsStore,
   getWindow: () => BrowserWindow | null,
@@ -173,6 +304,17 @@ export function registerIpcHandlers(
         if (result.ok) settings.set({ pairing: info });
         return result;
       },
+    ],
+    [
+      IPC.TTS_LIST_VOICES,
+      async (_e, req: ListVoicesRequest) => listElevenLabsVoices(req.apiKey),
+    ],
+    [
+      IPC.TTS_TEST,
+      async (_e, req: TestVoiceRequest) =>
+        testVoice(req, (chunk) => {
+          getWindow()?.webContents.send(IPC.AUDIO_TEST_TTS_CHUNK, chunk);
+        }),
     ],
   ];
 

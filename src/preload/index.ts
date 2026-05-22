@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IPC } from '../shared/constants';
-import type { PairingInfo, Settings } from '../shared/types';
+import type { ElevenLabsConfig, PairingInfo, Settings } from '../shared/types';
 
 type SettingsPatch = Partial<Settings>;
 
@@ -62,6 +62,19 @@ const api = {
           | { state: 'error'; message: string },
       ) => void,
     ): (() => void) => on(IPC.STT_STATUS, cb),
+  },
+
+  tts: {
+    listVoices: (
+      req: { provider: 'elevenlabs'; apiKey: string },
+    ): Promise<{ ok: boolean; voices: Array<{ id: string; name: string; language?: string; description?: string; preview_url?: string }>; message?: string }> =>
+      ipcRenderer.invoke(IPC.TTS_LIST_VOICES, req),
+    test: (
+      req: { provider: 'piper_local' | 'elevenlabs'; text: string; elevenlabs?: ElevenLabsConfig },
+    ): Promise<{ ok: boolean; message?: string }> => ipcRenderer.invoke(IPC.TTS_TEST, req),
+    onTestChunk: (
+      cb: (c: { seq: number; format: string; data: string; done?: boolean }) => void,
+    ): (() => void) => on(IPC.AUDIO_TEST_TTS_CHUNK, cb),
   },
 } as const;
 
