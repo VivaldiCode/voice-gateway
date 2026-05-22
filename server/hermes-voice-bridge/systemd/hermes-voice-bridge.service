@@ -1,0 +1,22 @@
+[Unit]
+Description=Voice Gateway bridge to the Hermes agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes-voice
+Group=hermes-voice
+WorkingDirectory=/opt/hermes-voice-bridge
+ExecStart=/opt/hermes-voice-bridge/venv/bin/hermes-voice-bridge
+Environment=HERMES_VOICE_BRIDGE_CONFIG=/etc/hermes-voice-bridge/config.toml
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/hermes-voice-bridge
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
