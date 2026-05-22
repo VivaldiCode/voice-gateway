@@ -1,4 +1,4 @@
-import { ipcMain, shell, systemPreferences, type BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, shell, systemPreferences } from 'electron';
 import log from 'electron-log/main';
 import WebSocket from 'ws';
 import { CLIENT_VERSION, IPC } from '@shared/constants';
@@ -9,6 +9,7 @@ import type { SettingsStore } from './services/settings-store';
 import { ElevenLabsAdapter, PiperAdapter, type TtsAdapter } from './services/tts-service';
 
 export type PrepareTtsCallback = () => Promise<{ ok: boolean; message?: string }>;
+export type PrepareSttCallback = () => Promise<{ ok: boolean; message?: string }>;
 
 export interface PairTestResult {
   ok: boolean;
@@ -303,6 +304,7 @@ export function registerIpcHandlers(
   settings: SettingsStore,
   getWindow: () => BrowserWindow | null,
   prepareTts: PrepareTtsCallback = async () => ({ ok: true }),
+  prepareStt: PrepareSttCallback = async () => ({ ok: true }),
 ): () => void {
   const handlers: Array<[string, Parameters<typeof ipcMain.handle>[1]]> = [
     [IPC.PING, async () => 'pong' as const],
@@ -326,10 +328,17 @@ export function registerIpcHandlers(
       IPC.TTS_TEST,
       async (_e, req: TestVoiceRequest) =>
         testVoice(req, (chunk) => {
-          getWindow()?.webContents.send(IPC.AUDIO_TEST_TTS_CHUNK, chunk);
+          // Test-voice chunks must reach the window that initiated the
+          // request — which is the Settings window. Use a broadcast to be
+          // safe (multiple windows can't reasonably overlap on this channel).
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed())
+              win.webContents.send(IPC.AUDIO_TEST_TTS_CHUNK, chunk);
+          }
         }),
     ],
     [IPC.TTS_PREPARE, async () => prepareTts()],
+    [IPC.STT_PREPARE, async () => prepareStt()],
     [
       IPC.AUDIO_MIC_STATUS,
       async () => {
@@ -373,8 +382,13 @@ export function registerIpcHandlers(
   }
 
   const unsubscribe = settings.onChange((next) => {
-    const win = getWindow();
-    win?.webContents.send(IPC.SETTINGS_CHANGED, next);
+    // Broadcast to all windows: when the user changes a setting in the
+    // dedicated Settings window we want the main window to update its UI
+    // (e.g. connection bar, activation mode) too.
+    void getWindow; // silence unused — kept for callers that still pass it
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC.SETTINGS_CHANGED, next);
+    }
   });
 
   return () => {

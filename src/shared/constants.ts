@@ -78,6 +78,7 @@ export const IPC = {
   WAKE_STATUS: 'vg:wake:status',
   STT_PROGRESS: 'vg:stt:progress',
   STT_STATUS: 'vg:stt:status',
+  STT_PREPARE: 'vg:stt:prepare',
   TTS_PROGRESS: 'vg:tts:progress',
   TTS_STATUS: 'vg:tts:status',
   TTS_LIST_VOICES: 'vg:tts:list-voices',

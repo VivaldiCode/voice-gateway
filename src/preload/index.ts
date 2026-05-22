@@ -71,6 +71,8 @@ const api = {
           | { state: 'error'; message: string },
       ) => void,
     ): (() => void) => on(IPC.STT_STATUS, cb),
+    prepare: (): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke(IPC.STT_PREPARE),
   },
 
   tts: {

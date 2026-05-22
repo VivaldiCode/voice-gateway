@@ -94,15 +94,31 @@ function openSettingsWindow(): void {
   loadRendererInto(win, 'settings');
   settingsWindow = win;
 }
-const unregisterIpc = registerIpcHandlers(settings, getMainWindow, async () => {
-  if (!activeTts) return { ok: false, message: 'TTS adapter not initialised yet.' };
-  try {
-    await prepareTts(activeTts);
-    return { ok: ttsStatus.state === 'ready' };
-  } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : 'erro desconhecido' };
-  }
-});
+const unregisterIpc = registerIpcHandlers(
+  settings,
+  getMainWindow,
+  async () => {
+    if (!activeTts) return { ok: false, message: 'TTS adapter not initialised yet.' };
+    try {
+      await prepareTts(activeTts);
+      return { ok: ttsStatus.state === 'ready' };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : 'erro desconhecido' };
+    }
+  },
+  async () => {
+    if (!activeStt) return { ok: false, message: 'STT adapter not initialised yet.' };
+    try {
+      // Force a fresh discovery — the user may have just installed
+      // whisper-cpp via Homebrew and wants the app to pick it up without
+      // restarting.
+      await prepareStt(activeStt);
+      return { ok: sttStatus.state === 'ready' };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : 'erro desconhecido' };
+    }
+  },
+);
 app.on('will-quit', () => unregisterIpc());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -120,7 +136,7 @@ let wake: WakeWordService | null = null;
 // the reference. Keep the variable around so future actions (re-prepare on
 // settings change, surface the adapter to a "test recognition" button, etc)
 // don't need plumbing.
-let _activeStt: SttAdapter | null = null;
+let activeStt: SttAdapter | null = null;
 let activeTts: TtsAdapter | null = null;
 type PrepareStatus<P> =
   | { state: 'idle' }
@@ -133,7 +149,13 @@ let sttStatus: SttStatus = { state: 'idle' };
 let ttsStatus: TtsStatus = { state: 'idle' };
 
 function send(channel: string, payload: unknown): void {
-  mainWindow?.webContents.send(channel, payload);
+  // Broadcast to every open BrowserWindow so the separate Settings window
+  // gets STT_STATUS / TTS_STATUS / conversation events in real time. With a
+  // single-window broadcast the Settings panel would only see the snapshot
+  // taken at ready-to-show and then silently drift out of sync.
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  }
 }
 
 function setSttStatus(next: SttStatus): void {
@@ -205,7 +227,7 @@ function bootstrapConversation(): void {
   // and piper-tts via Homebrew on first use, without bouncing the user back
   // to a terminal.
   const stt = createSttAdapter(s.stt, { autoInstall: true });
-  _activeStt = stt;
+  activeStt = stt;
   const tts = createTtsAdapter(s.tts, { autoInstall: true });
   activeTts = tts;
   orchestrator = new ConversationOrchestrator(client, stt, tts, s);

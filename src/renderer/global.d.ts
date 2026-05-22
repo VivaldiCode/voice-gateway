@@ -78,6 +78,7 @@ interface VgApi {
   };
   stt: {
     onStatus: (cb: (s: SttStatus) => void) => () => void;
+    prepare: () => Promise<{ ok: boolean; message?: string }>;
   };
   tts: {
     listVoices: (req: {

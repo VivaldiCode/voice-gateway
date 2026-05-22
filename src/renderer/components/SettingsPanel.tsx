@@ -646,11 +646,30 @@ function WhisperStatusCard({
   status: SttStatus;
   model: WhisperModel;
 }): JSX.Element {
+  const [checking, setChecking] = useState(false);
+  const recheck = useCallback(async () => {
+    setChecking(true);
+    try {
+      await window.vg.stt.prepare();
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
   if (status.state === 'ready') {
     return (
-      <div className="rounded-xl border border-green-800/60 bg-green-950/30 px-3 py-2 text-xs text-green-200">
-        ✓ Whisper local pronto. Modelo <code>ggml-{model}.bin</code> descarregado.
-        Carrega no botão para falar.
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-green-800/60 bg-green-950/30 px-3 py-2 text-xs text-green-200">
+        <span>
+          ✓ Whisper local pronto. Modelo <code>ggml-{model}.bin</code> descarregado.
+        </span>
+        <button
+          type="button"
+          onClick={recheck}
+          className="vg-no-drag rounded p-1 text-zinc-300 hover:text-white"
+          aria-label="Re-verificar"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+        </button>
       </div>
     );
   }
@@ -679,13 +698,26 @@ function WhisperStatusCard({
     );
   }
   if (status.state === 'error') {
-    // CommandHint renders the back-tick `brew install whisper-cpp` as a
-    // copy-able terminal box; users can act on it in one click.
-    return <CommandHint variant="error" message={status.message} />;
+    return (
+      <div className="flex flex-col gap-2">
+        <CommandHint variant="error" message={status.message} />
+        <Button onClick={recheck} loading={checking} size="sm" variant="secondary">
+          <RefreshCw className="mr-1 h-3.5 w-3.5" />
+          Verificar de novo
+        </Button>
+      </div>
+    );
   }
+  // idle — main process is still starting up, or the user just changed
+  // provider so prepareStt hasn't fired yet. Offer the same retry button
+  // so a user who installed whisper-cpp just now can poke the discovery.
   return (
-    <div className="rounded-xl border border-bg-subtle bg-bg-panel/60 px-3 py-2 text-xs text-zinc-300">
-      A inicializar…
+    <div className="flex flex-col gap-2 rounded-xl border border-bg-subtle bg-bg-panel/60 px-3 py-2 text-xs text-zinc-300">
+      <span>A inicializar…</span>
+      <Button onClick={recheck} loading={checking} size="sm" variant="secondary">
+        <RefreshCw className="mr-1 h-3.5 w-3.5" />
+        Verificar agora
+      </Button>
     </div>
   );
 }
