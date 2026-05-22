@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Required for `getUserMedia({audio: true})` to actually surface
+         (and remember) the macOS permission prompt under the hardened
+         runtime. Without this, even with NSMicrophoneUsageDescription set,
+         getUserMedia rejects with AbortError. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Electron + dynamic JIT requirements. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- We spawn whisper-cli / piper / python3 from the bundle. With the
+         hardened runtime + library validation enabled, those child
+         processes inherit our restrictions and refuse to load. Allow
+         loading libraries signed by other developers (Homebrew, Apple). -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

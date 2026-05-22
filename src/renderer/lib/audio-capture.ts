@@ -84,16 +84,42 @@ export class AudioCapture {
 
   async start(opts: AudioCaptureOptions = {}): Promise<void> {
     if (this.ctx) return;
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        ...(opts.deviceId ? { deviceId: { exact: opts.deviceId } } : {}),
-        channelCount: AUDIO_CHANNELS,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: false,
-      },
-      video: false,
-    });
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(opts.deviceId ? { deviceId: { exact: opts.deviceId } } : {}),
+          channelCount: AUDIO_CHANNELS,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+        },
+        video: false,
+      });
+    } catch (err) {
+      // Fall back to the system-default mic if the requested device became
+      // unavailable (e.g. unplugged between enumerate + getUserMedia).
+      if (
+        opts.deviceId &&
+        err instanceof Error &&
+        (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')
+      ) {
+        try {
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: AUDIO_CHANNELS,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: false,
+            },
+            video: false,
+          });
+        } catch (fallbackErr) {
+          throw friendlyAudioError(fallbackErr);
+        }
+      } else {
+        throw friendlyAudioError(err);
+      }
+    }
     const ctx = new AudioContext();
     this.ctx = ctx;
 
@@ -174,4 +200,39 @@ export class AudioCapture {
  */
 export async function listAudioDevices(): Promise<MediaDeviceInfo[]> {
   return await navigator.mediaDevices.enumerateDevices();
+}
+
+/**
+ * Map raw DOMException names from getUserMedia into Portuguese, actionable
+ * messages. Centralised so both AudioCapture.start() and the settings test
+ * surface the same wording.
+ */
+export function friendlyAudioError(err: unknown): Error {
+  if (!(err instanceof Error)) return new Error(String(err));
+  const name = (err as DOMException).name ?? '';
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return new Error(
+        'Permissão de microfone negada. Abre Definições do Sistema → Privacidade e Segurança → Microfone e ativa a Voice Gateway.',
+      );
+    case 'NotFoundError':
+      return new Error(
+        'Não encontrei nenhum microfone. Liga o teu microfone e tenta de novo.',
+      );
+    case 'NotReadableError':
+      return new Error(
+        'O microfone está ocupado. Fecha apps que estejam a gravar (Zoom, Discord, FaceTime, OBS…) e tenta de novo.',
+      );
+    case 'OverconstrainedError':
+      return new Error(
+        'O microfone seleccionado não suporta o formato pedido. Escolhe outro em Definições → Microfone.',
+      );
+    case 'AbortError':
+      return new Error(
+        'O pedido ao microfone foi cancelado. Verifica em Definições do Sistema → Privacidade e Segurança → Microfone se a Voice Gateway está autorizada — depois fecha e reabre a app.',
+      );
+    default:
+      return new Error(`Falha a abrir o microfone (${name || 'erro'}): ${err.message}`);
+  }
 }

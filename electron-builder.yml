@@ -39,6 +39,15 @@ mac:
   gatekeeperAssess: false
   identity: null
   icon: resources/icon.icns
+  # macOS refuses to surface a permission prompt for the microphone without
+  # NSMicrophoneUsageDescription in Info.plist; without it, getUserMedia
+  # rejects silently with AbortError. The com.apple.security.device.audio-input
+  # entitlement is the hardened-runtime counterpart of the same permission.
+  extendInfo:
+    NSMicrophoneUsageDescription: A Voice Gateway precisa do microfone para gravar o que dizes ao Hermes.
+    NSCameraUsageDescription: A Voice Gateway não usa a câmara; esta entrada existe só para compatibilidade.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 linux:
   target:
     - AppImage

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type Tray, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, session, systemPreferences, type Tray, screen } from 'electron';
 import log from 'electron-log/main';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -327,7 +327,39 @@ settings.onChange((next) => {
   rebuildWakeWord();
 });
 
+/**
+ * Wire microphone permissions exactly once at app boot.
+ *
+ * - macOS hardened-runtime apps cannot access the mic at all without
+ *   NSMicrophoneUsageDescription + the audio-input entitlement (both
+ *   declared in electron-builder.yml / build/entitlements.mac.plist).
+ * - Electron's renderer additionally has to be granted the 'media'
+ *   permission via the session; without this, getUserMedia rejects with
+ *   AbortError even when System Preferences shows the app as allowed.
+ */
+function wireMediaPermissions(): void {
+  const GRANTED = new Set(['media', 'audioCapture', 'microphone']);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
+    cb(GRANTED.has(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    GRANTED.has(permission),
+  );
+
+  // On macOS we can also pre-ask the OS so the system-level prompt shows up
+  // *now* rather than when the user clicks the call button. Best-effort —
+  // ignore the returned boolean.
+  if (process.platform === 'darwin') {
+    try {
+      void systemPreferences.askForMediaAccess('microphone');
+    } catch (err) {
+      log.warn('[VG] askForMediaAccess failed', err);
+    }
+  }
+}
+
 app.whenReady().then(() => {
+  wireMediaPermissions();
   createMainWindow();
   tray = createTray(getMainWindow);
   void tray; // suppress unused warning until extended
