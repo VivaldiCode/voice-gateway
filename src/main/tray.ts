@@ -1,17 +1,25 @@
 import { Menu, Tray, app, nativeImage, type BrowserWindow } from 'electron';
 import log from 'electron-log/main';
+import { resolveResource } from './asset-paths';
 
 /**
- * Minimal system-tray icon with show / hide / quit menu items.
- * Falls back to a 16x16 transparent placeholder when no icon is bundled.
+ * System tray icon with show/hide/quit. Uses the 32×32 PNG variant (macOS
+ * template-resized at the OS level) and falls back to an empty image with a
+ * text label if the asset is missing.
  */
 export function createTray(getWindow: () => BrowserWindow | null): Tray {
-  const icon = nativeImage.createEmpty();
-  // Tray icons must not be the empty image on macOS in production; for our
-  // dev scaffold the empty image is fine and the OS shows the label.
-  const tray = new Tray(icon);
+  const iconPath = resolveResource('icons', 'icon-32.png');
+  let image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) {
+    log.warn('[VG] tray icon not found at', iconPath, '— using placeholder');
+    image = nativeImage.createEmpty();
+  } else if (process.platform === 'darwin') {
+    // Resize down for retina menubar (16pt height, 32px @2x).
+    image = image.resize({ width: 18, height: 18 });
+  }
+  const tray = new Tray(image);
   tray.setToolTip('Voice Gateway');
-  if (process.platform === 'darwin') tray.setTitle('VG');
+  if (image.isEmpty() && process.platform === 'darwin') tray.setTitle('VG');
 
   const refreshMenu = (): void => {
     const win = getWindow();

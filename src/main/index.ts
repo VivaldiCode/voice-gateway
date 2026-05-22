@@ -12,6 +12,7 @@ import { ConversationOrchestrator } from './services/conversation-orchestrator';
 import { WakeWordService } from './services/wake-word-service';
 import { createTray } from './tray';
 import { registerHotkey } from './global-shortcut';
+import { resolveResource } from './asset-paths';
 
 log.initialize();
 log.transports.file.level = 'info';
@@ -132,6 +133,7 @@ function createMainWindow(): BrowserWindow {
     backgroundColor: '#0b0d10',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     show: false,
+    icon: resolveResource('icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,

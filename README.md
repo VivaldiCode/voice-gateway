@@ -1,6 +1,12 @@
-# Voice Gateway
+<div align="center">
+  <img src="resources/icon.svg" alt="Voice Gateway" width="128" height="128" />
+  <h1>Voice Gateway</h1>
+  <p>
+    <em>Talk to your <a href="https://hermes-agent.nousresearch.com/">Hermes agent</a> by voice.</em>
+  </p>
+</div>
 
-Talk to your self-hosted [Hermes agent](https://hermes-agent.nousresearch.com/) by voice — push-to-talk or wake word, with **local-first** STT/TTS and optional cloud upgrades. No API keys required to get a first conversation going.
+Push-to-talk or wake word, with **local-first** STT/TTS and optional cloud upgrades. No API keys required to get a first conversation going.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐

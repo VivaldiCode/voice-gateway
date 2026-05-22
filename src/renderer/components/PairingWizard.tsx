@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, Mic, Headphones } from 'lucide-react';
 import { Button } from './Button';
+import { Logo } from './Logo';
 import { cn } from '../lib/cn';
 import { SUPPORTED_WAKE_WORDS, type WakeWord } from '../../shared/constants';
 import type { ActivationMode } from '../../shared/types';
@@ -61,6 +62,9 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
 
   return (
     <div className="flex h-full w-full flex-col bg-bg">
+      <div className="flex items-center justify-center px-8 pt-6">
+        <Logo size={36} wordmark tagline="setup inicial" />
+      </div>
       <Stepper current={step} />
       <main className="flex-1 overflow-y-auto px-8 pb-8 pt-4">
         {step === 'url' && (
@@ -371,7 +375,8 @@ function DoneStep({ onContinue }: { onContinue: () => void }): JSX.Element {
       className="mx-auto flex max-w-md flex-col items-center gap-6 pt-12 text-center"
       data-testid="pairing-done"
     >
-      <CheckCircle2 className="h-16 w-16 text-green-400" />
+      <Logo size={96} />
+      <CheckCircle2 className="h-10 w-10 text-green-400" />
       <h1 className="text-2xl font-semibold">Pronto! Diz olá ao Hermes.</h1>
       <p className="text-sm text-zinc-400">
         Podes ajustar voz, microfone e palavra de ativação nas definições.

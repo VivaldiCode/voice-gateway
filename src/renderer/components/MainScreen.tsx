@@ -1,6 +1,7 @@
 import { Settings as SettingsIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
+import { Logo } from './Logo';
 import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
 import { useConversation } from '../hooks/useConversation';
@@ -24,18 +25,8 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-2 px-5 py-4 text-xs text-zinc-400">
-        <div className="flex items-center gap-2" data-testid="connection-indicator">
-          <span className={dotClass} aria-hidden="true" />
-          <span>
-            {conv.connection.status === 'connected'
-              ? `Ligado ${conv.connection.latencyMs != null ? `(${conv.connection.latencyMs} ms)` : ''}`
-              : conv.connection.status === 'connecting'
-                ? 'A ligar…'
-                : 'Sem ligação'}
-          </span>
-          {bridgeUrl && <span className="text-zinc-600">• {bridgeUrl}</span>}
-        </div>
+      <header className="flex items-center justify-between gap-2 px-5 pt-4 pb-2">
+        <Logo size={28} wordmark />
         <Button
           variant="ghost"
           size="sm"
@@ -46,6 +37,20 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           <SettingsIcon className="h-4 w-4" />
         </Button>
       </header>
+      <div
+        className="flex items-center gap-2 px-5 pb-3 text-xs text-zinc-400"
+        data-testid="connection-indicator"
+      >
+        <span className={dotClass} aria-hidden="true" />
+        <span>
+          {conv.connection.status === 'connected'
+            ? `Ligado ${conv.connection.latencyMs != null ? `(${conv.connection.latencyMs} ms)` : ''}`
+            : conv.connection.status === 'connecting'
+              ? 'A ligar…'
+              : 'Sem ligação'}
+        </span>
+        {bridgeUrl && <span className="truncate text-zinc-600">• {bridgeUrl}</span>}
+      </div>
 
       <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6">
         <StateOrb state={conv.state} />

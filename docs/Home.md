@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/resources/icon.svg" alt="Voice Gateway" width="128" height="128" />
+</p>
+
 # Voice Gateway Wiki
 
 Talk to your self-hosted [Hermes agent](https://hermes-agent.nousresearch.com/)

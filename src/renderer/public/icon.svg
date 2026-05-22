@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Voice Gateway logo">
+  <title>Voice Gateway</title>
+  <defs>
+    <linearGradient id="vg-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a48bff"/>
+      <stop offset="100%" stop-color="#5a3ec7"/>
+    </linearGradient>
+    <radialGradient id="vg-orb" cx="50%" cy="42%" r="55%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="80%" stop-color="#eee7ff"/>
+      <stop offset="100%" stop-color="#dad0ff"/>
+    </radialGradient>
+  </defs>
+  <!-- macOS Big-Sur-style rounded square background -->
+  <rect width="1024" height="1024" rx="225" ry="225" fill="url(#vg-bg)"/>
+  <!-- Soft concentric halos behind the orb -->
+  <circle cx="512" cy="512" r="390" fill="#ffffff" fill-opacity="0.06"/>
+  <circle cx="512" cy="512" r="320" fill="#ffffff" fill-opacity="0.10"/>
+  <!-- Main orb (echoes the StateOrb in the desktop UI) -->
+  <circle cx="512" cy="512" r="282" fill="url(#vg-orb)"/>
+  <!-- Soundwave glyph: three rounded bars (low-high-low) -->
+  <g fill="#5a3ec7">
+    <rect x="422" y="442" width="50" height="140" rx="25"/>
+    <rect x="487" y="362" width="50" height="300" rx="25"/>
+    <rect x="552" y="442" width="50" height="140" rx="25"/>
+  </g>
+</svg>

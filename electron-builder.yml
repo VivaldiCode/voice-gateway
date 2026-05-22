@@ -17,6 +17,14 @@ extraResources:
     to: piper
     filter:
       - "**/*"
+  - from: resources/icon.png
+    to: icon.png
+  - from: resources/icon.svg
+    to: icon.svg
+  - from: resources/icons
+    to: icons
+    filter:
+      - "icon-*.png"
 mac:
   category: public.app-category.utilities
   target:
@@ -26,16 +34,18 @@ mac:
   hardenedRuntime: true
   gatekeeperAssess: false
   identity: null
-  icon: resources/icon.png
+  icon: resources/icon.icns
 linux:
   target:
     - AppImage
   category: AudioVideo
+  icon: resources/icon.png
 win:
   target:
     - target: nsis
       arch:
         - x64
+  icon: resources/icon.ico
 nsis:
   oneClick: false
   perMachine: false
