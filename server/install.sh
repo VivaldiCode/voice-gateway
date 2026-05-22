@@ -110,9 +110,6 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------- now running as root ----------
-if ! command -v systemctl >/dev/null 2>&1; then
-  fail "systemd is required. (Found no 'systemctl' in PATH.)"
-fi
 
 # If we were re-exec'd from a /tmp copy, self-delete on exit so we leave
 # nothing behind.
@@ -120,17 +117,106 @@ if [[ "$(dirname -- "$0")" == "/tmp" ]] && [[ "$(basename -- "$0")" == vg-instal
   trap 'rm -f -- "$0"' EXIT
 fi
 
-check_python() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    fail "python3 is required. Install it first: apt install python3 python3-venv python3-pip"
-  fi
-  local ver
-  ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-  case "$ver" in
-    3.10|3.11|3.12|3.13|3.14) ok "python3 ${ver} found";;
-    *) fail "python3 >=3.10 required, found ${ver}";;
+# ---------- package manager auto-install ----------
+#
+# Detect the distro's package manager and offer to install missing
+# dependencies. The user is prompted once per package (default Yes) so a
+# bare-bones Debian/Ubuntu box can be brought up without leaving the
+# installer.
+
+detect_pkg_manager() {
+  for cmd in apt-get dnf yum pacman apk zypper; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      printf '%s\n' "$cmd"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PKG_MGR="$(detect_pkg_manager 2>/dev/null || true)"
+APT_UPDATED=""
+
+pkg_install_one() {
+  local pkg="$1"
+  case "$PKG_MGR" in
+    apt-get)
+      if [[ -z "$APT_UPDATED" ]]; then
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+        APT_UPDATED=1
+      fi
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" >/dev/null 2>&1
+      ;;
+    dnf)    dnf install -y "$pkg" >/dev/null 2>&1 ;;
+    yum)    yum install -y "$pkg" >/dev/null 2>&1 ;;
+    pacman) pacman -Sy --noconfirm --needed "$pkg" >/dev/null 2>&1 ;;
+    apk)    apk add --no-cache "$pkg" >/dev/null 2>&1 ;;
+    zypper) zypper --non-interactive install "$pkg" >/dev/null 2>&1 ;;
+    *)      return 127 ;;
   esac
-  python3 -c "import venv" 2>/dev/null || fail "python3-venv missing. Install: apt install python3-venv"
+}
+
+# ensure_installed FRIENDLY_NAME CHECK_CMD PACKAGE [ALTERNATIVE_PACKAGE...]
+# CHECK_CMD must succeed (exit 0) when FRIENDLY_NAME is already satisfied.
+# Each PACKAGE is tried in order; the first one whose install makes
+# CHECK_CMD pass wins. Prompts the user before installing unless
+# ASSUME_YES is set.
+ensure_installed() {
+  local name="$1" check="$2"
+  shift 2
+  if eval "$check" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -z "$PKG_MGR" ]]; then
+    fail "Required: ${name}. Couldn't detect a supported package manager — install '$*' manually and re-run."
+  fi
+  warn "missing required dependency: ${name}"
+  if [[ -z "${ASSUME_YES:-}" ]]; then
+    local ans
+    printf "  install via %s now? [Y/n] " "$PKG_MGR"
+    if ! read -r ans </dev/tty 2>/dev/null; then
+      ans="Y"   # no tty (piped) → assume yes
+    fi
+    case "${ans:-Y}" in
+      [yY]*|"") ;;
+      *) fail "cannot continue without ${name}. Install '$*' and re-run." ;;
+    esac
+  fi
+  local pkg attempted=()
+  for pkg in "$@"; do
+    attempted+=("$pkg")
+    printf "  → installing %s … " "$pkg"
+    if pkg_install_one "$pkg"; then
+      if eval "$check" >/dev/null 2>&1; then
+        printf "ok\n"
+        ok "${name} ready"
+        return 0
+      fi
+      printf "installed but check still fails\n"
+    else
+      printf "not available\n"
+    fi
+  done
+  fail "couldn't install ${name} after trying: ${attempted[*]}. Please install manually and re-run."
+}
+
+# systemctl is a hard requirement we won't auto-install (would mean
+# bootstrapping a different init system). Fail with a friendly message.
+if ! command -v systemctl >/dev/null 2>&1; then
+  fail "systemd is required (no 'systemctl' on PATH). This installer doesn't support non-systemd distros."
+fi
+
+ensure_python_version() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+  python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null
+}
+
+ensure_python_venv_ready() {
+  # Both checks must pass: venv module importable AND ensurepip data present
+  # (the second is what fails on Debian/Ubuntu without python3-venv).
+  python3 -c 'import venv, ensurepip' >/dev/null 2>&1
 }
 
 # ---------- args / prompts ----------
@@ -159,15 +245,27 @@ while [[ $# -gt 0 ]]; do
 done
 
 banner
-check_python
+
+# ---------- dependency check (auto-install with confirmation) ----------
+ensure_installed "curl" "command -v curl" "curl"
+ensure_installed "git"  "command -v git"  "git"
+
+ensure_installed "python3 (>= 3.10)" "ensure_python_version" \
+  "python3" "python3.12" "python3.11" "python3.10"
+
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+ensure_installed "python venv + ensurepip" "ensure_python_venv_ready" \
+  "python${PY_VER}-venv" "python3-venv" "python3-virtualenv"
+
+ok "python3 ${PY_VER} ready"
 
 if [[ -z "$ASSUME_YES" ]]; then
-  read -r -p "Bridge listen port [${BRIDGE_PORT}]: " answer || true
+  read -r -p "Bridge listen port [${BRIDGE_PORT}]: " answer </dev/tty || true
   [[ -n "${answer:-}" ]] && BRIDGE_PORT="$answer"
-  read -r -p "Local Hermes API URL [${HERMES_URL}]: " answer || true
+  read -r -p "Local Hermes API URL [${HERMES_URL}]: " answer </dev/tty || true
   [[ -n "${answer:-}" ]] && HERMES_URL="$answer"
   printf "\nProceed with install? [y/N] "
-  read -r confirm
+  read -r confirm </dev/tty || confirm="n"
   [[ "$confirm" =~ ^[yY] ]] || { warn "Aborted."; exit 0; }
 fi
 
