@@ -12,6 +12,9 @@ Schema:
     [hermes]
     base_url = "http://localhost:8642"
     request_timeout = 30
+    # Optional — only needed if the Hermes API requires Bearer auth.
+    # Omit / leave empty to call Hermes without an Authorization header.
+    api_key = ""
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ class BridgeConfig:
     token: str
     hermes_base_url: str
     hermes_request_timeout: int
+    hermes_api_key: str
 
     @classmethod
     def from_dict(cls, data: dict) -> "BridgeConfig":
@@ -49,6 +53,7 @@ class BridgeConfig:
             token=str(token),
             hermes_base_url=str(hermes.get("base_url", "http://localhost:8642")),
             hermes_request_timeout=int(hermes.get("request_timeout", 30)),
+            hermes_api_key=str(hermes.get("api_key", "")).strip(),
         )
 
     @classmethod

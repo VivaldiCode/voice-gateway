@@ -39,7 +39,9 @@ def build_app(config: BridgeConfig, adapter: Optional[HermesAdapter] = None) -> 
     app = web.Application()
     app["config"] = config
     app["adapter"] = adapter or HermesAdapter(
-        config.hermes_base_url, config.hermes_request_timeout
+        config.hermes_base_url,
+        config.hermes_request_timeout,
+        api_key=config.hermes_api_key,
     )
 
     async def _auth_middleware(request: web.Request, handler):

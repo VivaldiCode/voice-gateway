@@ -43,10 +43,12 @@ class HermesAdapter:
         *,
         model: str = DEFAULT_MODEL,
         history_turns: int = DEFAULT_HISTORY_TURNS,
+        api_key: str = "",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = aiohttp.ClientTimeout(total=request_timeout)
         self._model = model
+        self._api_key = api_key.strip()
         # session_id → deque of {"role": "...", "content": "..."} dicts.
         self._history: Dict[str, Deque[Dict[str, str]]] = {}
         self._history_max = max(2, history_turns)
@@ -95,9 +97,25 @@ class HermesAdapter:
         # Buffer the assistant's reply so we can record it in history once
         # the stream completes successfully.
         buffered: List[str] = []
+        headers: Dict[str, str] = {}
+        if self._api_key:
+            # OpenAI-compatible servers expect Bearer auth. Hermes' own API
+            # follows that convention.
+            headers["Authorization"] = f"Bearer {self._api_key}"
         try:
             async with self._session() as session:
-                async with session.post(url, json=payload) as resp:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status == 401:
+                        body = await resp.text()
+                        hint = (
+                            " (the bridge sent no Authorization header — set "
+                            "hermes.api_key in /etc/hermes-voice-bridge/config.toml)"
+                            if not self._api_key
+                            else " (the configured hermes.api_key was rejected)"
+                        )
+                        raise HermesUpstreamError(
+                            f"hermes returned 401:{hint} {body[:200]}"
+                        )
                     if resp.status != 200:
                         body = await resp.text()
                         raise HermesUpstreamError(

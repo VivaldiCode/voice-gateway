@@ -37,6 +37,7 @@ def _config() -> BridgeConfig:
         token=TOKEN,
         hermes_base_url="http://unused",
         hermes_request_timeout=5,
+        hermes_api_key="",
     )
 
 
@@ -222,3 +223,77 @@ async def test_hermes_adapter_propagates_upstream_failure(aiohttp_server) -> Non
     with pytest.raises(Exception, match="hermes returned 503"):
         async for _ in adapter.stream_chat(text="x"):
             pass
+
+
+async def test_hermes_adapter_sends_bearer_when_api_key_configured(
+    aiohttp_server,
+) -> None:
+    """The bridge MUST forward `Authorization: Bearer <key>` when an api_key
+    is configured. Without this the user's Hermes instance returns 401
+    'Invalid API key'."""
+    seen_auth: list[str | None] = []
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        seen_auth.append(request.headers.get("Authorization"))
+        resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
+        await resp.prepare(request)
+        await resp.write(b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n')
+        await resp.write(b"data: [DONE]\n\n")
+        await resp.write_eof()
+        return resp
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", handler)
+    server = await aiohttp_server(app)
+    adapter = HermesAdapter(
+        f"http://127.0.0.1:{server.port}", request_timeout=5, api_key="sk-abc123"
+    )
+    [_ async for _ in adapter.stream_chat(text="ping")]
+    assert seen_auth == ["Bearer sk-abc123"]
+
+
+async def test_hermes_adapter_omits_auth_header_when_no_api_key(
+    aiohttp_server,
+) -> None:
+    """And MUST NOT send a stray Authorization header when the user runs an
+    open Hermes instance, to avoid breaking installations that don't expect
+    one."""
+    seen_auth: list[str | None] = []
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        seen_auth.append(request.headers.get("Authorization"))
+        resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
+        await resp.prepare(request)
+        await resp.write(b"data: [DONE]\n\n")
+        await resp.write_eof()
+        return resp
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", handler)
+    server = await aiohttp_server(app)
+    adapter = HermesAdapter(f"http://127.0.0.1:{server.port}", request_timeout=5)
+    [_ async for _ in adapter.stream_chat(text="ping")]
+    assert seen_auth == [None]
+
+
+async def test_hermes_adapter_friendly_401_message_without_key(aiohttp_server) -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.Response(status=401, text='{"error":{"message":"Invalid API key"}}')
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", handler)
+    server = await aiohttp_server(app)
+    adapter = HermesAdapter(f"http://127.0.0.1:{server.port}", request_timeout=5)
+    with pytest.raises(Exception, match=r"hermes returned 401.*no Authorization header"):
+        async for _ in adapter.stream_chat(text="x"):
+            pass
+
+
+def test_config_parses_optional_api_key() -> None:
+    cfg = BridgeConfig.from_dict(
+        {"bridge": {"token": "x"}, "hermes": {"api_key": "  sk-xyz  "}}
+    )
+    assert cfg.hermes_api_key == "sk-xyz"
+
+    cfg2 = BridgeConfig.from_dict({"bridge": {"token": "x"}})
+    assert cfg2.hermes_api_key == ""
