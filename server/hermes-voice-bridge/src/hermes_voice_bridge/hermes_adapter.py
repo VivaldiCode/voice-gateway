@@ -35,6 +35,33 @@ class HermesUpstreamError(RuntimeError):
     pass
 
 
+def _extract_openai_message(body: dict) -> Optional[str]:
+    """Pull the assistant message text out of a non-streaming OpenAI-shaped
+    chat completion response. Returns None on shapes we don't recognise."""
+    if not isinstance(body, dict):
+        return None
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        # Some non-OpenAI servers return {"text": "..."} directly.
+        for key in ("text", "content", "output"):
+            v = body.get(key)
+            if isinstance(v, str) and v.strip():
+                return v
+        return None
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return None
+    msg = choice.get("message") or choice.get("delta")
+    if isinstance(msg, dict):
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+    text = choice.get("text")
+    if isinstance(text, str):
+        return text
+    return None
+
+
 class HermesAdapter:
     def __init__(
         self,
@@ -78,10 +105,66 @@ class HermesAdapter:
         async with aiohttp.ClientSession(timeout=self._timeout) as session:
             yield session
 
+    async def _fetch_non_stream(
+        self,
+        *,
+        text: str,
+        headers: Dict[str, str],
+        messages: List[Dict[str, str]],
+    ) -> Optional[str]:
+        """Retry the same chat-completions request with stream=False and
+        unwrap the single JSON body. Used as a fallback when the streaming
+        path produces zero deltas (Hermes builds that ignore stream=true).
+        Returns the assistant text or None."""
+        url = f"{self._base_url}/v1/chat/completions"
+        payload = {"model": self._model, "messages": messages, "stream": False}
+        log.info("hermes non-stream fallback: POST %s", url)
+        try:
+            async with self._session() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    body_text = await resp.text()
+                    if resp.status != 200:
+                        log.warning(
+                            "hermes non-stream fallback returned %d: %s",
+                            resp.status,
+                            body_text[:200],
+                        )
+                        return None
+                    try:
+                        body = json.loads(body_text)
+                    except json.JSONDecodeError:
+                        log.warning(
+                            "hermes non-stream fallback body not JSON: %s",
+                            body_text[:200],
+                        )
+                        # Some servers emit a plain text string directly.
+                        return body_text.strip() or None
+                    extracted = _extract_openai_message(body)
+                    if extracted:
+                        log.info(
+                            "hermes non-stream fallback OK — %d chars", len(extracted)
+                        )
+                    else:
+                        log.warning(
+                            "hermes non-stream fallback parsed but no message"
+                            " content (body=%s)",
+                            body_text[:200],
+                        )
+                    return extracted
+        except Exception as e:  # noqa: BLE001
+            log.warning("hermes non-stream fallback failed: %s", e)
+            return None
+
     async def stream_chat(
         self, *, text: str, session_id: Optional[str] = None
     ) -> AsyncIterator[str]:
         """Yield text deltas for one user turn, keeping session history.
+
+        Tries the streaming endpoint first. If the upstream returns 200 but
+        yields zero parseable deltas (some Hermes builds and proxies ignore
+        ``stream: true`` and return one final JSON body), automatically
+        retries the same request with ``stream: false`` and emits the full
+        ``choices[0].message.content`` as a single delta.
 
         Closes the upstream connection on cancellation.
         """
@@ -134,17 +217,23 @@ class HermesAdapter:
                         delta_count,
                         sum(len(b) for b in buffered),
                     )
-                    if delta_count == 0:
-                        # Streaming endpoint returned a 200 but emitted no deltas.
-                        # Either Hermes ignored stream=true (returned a single
-                        # JSON body) or replied with an empty body. Re-read with
-                        # a JSON fallback to recover the message.
-                        # (Note: most aiohttp impls disallow reading body twice;
-                        # we silently no-op here and log the gap.)
-                        log.warning(
-                            "hermes stream produced zero deltas — check that the"
-                            " server actually streams /v1/chat/completions"
-                        )
+            if delta_count == 0:
+                # The streaming endpoint returned 200 but emitted nothing
+                # parseable. Some Hermes builds (and proxies in front of it)
+                # ignore stream=true and reply with a single JSON body, in
+                # which case the SSE parser sees no `data:` lines. Retry the
+                # same request with stream=false and unwrap the OpenAI
+                # response shape into one synthetic delta.
+                fallback = await self._fetch_non_stream(text=text, headers=headers, messages=messages)
+                if fallback:
+                    buffered.append(fallback)
+                    yield fallback
+                else:
+                    log.warning(
+                        "hermes returned 200 with zero deltas AND empty"
+                        " non-stream fallback — the upstream is producing no"
+                        " content (check Hermes model + agent logs)"
+                    )
         finally:
             full = "".join(buffered).strip()
             if full:

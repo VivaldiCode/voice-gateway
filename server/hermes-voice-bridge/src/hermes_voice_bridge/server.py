@@ -141,11 +141,25 @@ async def _run_turn(
             await ws.send_json(
                 {"type": "response_text", "turn_id": turn_id, "text": delta, "final": False}
             )
-        if not ws.closed:
-            await ws.send_json(
-                {"type": "response_text", "turn_id": turn_id, "text": buffered, "final": True}
+        if ws.closed:
+            return
+        if not buffered.strip():
+            # Hermes accepted the request but produced no content. Surface
+            # an error so the desktop user sees something actionable instead
+            # of a silently-empty assistant bubble.
+            await send_error(
+                ws,
+                "HERMES_UPSTREAM",
+                "Hermes respondeu mas sem texto. Verifica os logs do agent"
+                " (journalctl -u hermes-agent ou equivalente) — o modelo pode"
+                " não estar carregado.",
+                turn_id=turn_id,
             )
-            await ws.send_json({"type": "response_end", "turn_id": turn_id})
+            return
+        await ws.send_json(
+            {"type": "response_text", "turn_id": turn_id, "text": buffered, "final": True}
+        )
+        await ws.send_json({"type": "response_end", "turn_id": turn_id})
     except HermesUpstreamError as err:
         log.warning("hermes upstream error: %s", err)
         if not ws.closed:

@@ -255,18 +255,24 @@ async def test_hermes_adapter_sends_bearer_when_api_key_configured(
 async def test_hermes_adapter_omits_auth_header_when_no_api_key(
     aiohttp_server,
 ) -> None:
-    """And MUST NOT send a stray Authorization header when the user runs an
-    open Hermes instance, to avoid breaking installations that don't expect
-    one."""
+    """The adapter MUST NOT send a stray Authorization header on either the
+    primary streaming request or the non-stream fallback."""
     seen_auth: list[str | None] = []
 
     async def handler(request: web.Request) -> web.StreamResponse:
         seen_auth.append(request.headers.get("Authorization"))
-        resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
-        await resp.prepare(request)
-        await resp.write(b"data: [DONE]\n\n")
-        await resp.write_eof()
-        return resp
+        body = await request.json()
+        if body.get("stream"):
+            resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
+            await resp.prepare(request)
+            # Emit one parseable delta so the fallback path doesn't fire —
+            # the fallback is exercised by its own dedicated test.
+            await resp.write(
+                b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'
+            )
+            await resp.write_eof()
+            return resp
+        return web.json_response({"choices": [{"message": {"content": "x"}}]})
 
     app = web.Application()
     app.router.add_post("/v1/chat/completions", handler)
@@ -287,6 +293,46 @@ async def test_hermes_adapter_friendly_401_message_without_key(aiohttp_server) -
     with pytest.raises(Exception, match=r"hermes returned 401.*no Authorization header"):
         async for _ in adapter.stream_chat(text="x"):
             pass
+
+
+async def test_hermes_adapter_falls_back_to_non_stream_when_no_deltas(
+    aiohttp_server,
+) -> None:
+    """Some Hermes builds (or HTTP proxies in front of them) ignore
+    stream=true and return 200 with an empty SSE body, then expect the
+    client to fall back to a regular chat-completions request. The adapter
+    must auto-retry with stream=false and unwrap choices[0].message.content."""
+    seen_stream_flag: list[bool] = []
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        body = await request.json()
+        seen_stream_flag.append(bool(body.get("stream")))
+        if body.get("stream"):
+            resp = web.StreamResponse(
+                status=200, headers={"Content-Type": "text/event-stream"}
+            )
+            await resp.prepare(request)
+            # End the stream immediately with no data frames.
+            await resp.write_eof()
+            return resp
+        return web.json_response(
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "olá humano (fallback)"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", handler)
+    server = await aiohttp_server(app)
+    adapter = HermesAdapter(f"http://127.0.0.1:{server.port}", request_timeout=5)
+    deltas = [d async for d in adapter.stream_chat(text="oi")]
+    assert seen_stream_flag == [True, False]
+    assert "".join(deltas) == "olá humano (fallback)"
 
 
 async def test_hermes_adapter_handles_packets_split_mid_line(
