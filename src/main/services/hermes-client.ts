@@ -23,6 +23,7 @@ import {
   type ServerMessage,
   parseServerMessage,
 } from '@shared/protocol';
+import { normalizeBridgeUrl } from '@shared/url-utils';
 import type { ConnectionStatus, PairingInfo } from '@shared/types';
 
 type ClientCapsList = readonly ClientCapability[];
@@ -115,7 +116,11 @@ export class HermesClient extends EventEmitter {
   // --- Public surface -----------------------------------------------------
 
   connect(info: PairingInfo): void {
-    this.pairingInfo = info;
+    const normalized = normalizeBridgeUrl(info.url);
+    if (normalized.pathWasAdded) {
+      log.info('[VG] hermes connect: appended /ws to URL →', normalized.url);
+    }
+    this.pairingInfo = { ...info, url: normalized.url };
     this.explicitDisconnect = false;
     this.reconnectAttempt = 0;
     this.openSocket();

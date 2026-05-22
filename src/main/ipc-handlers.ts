@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import { CLIENT_VERSION, IPC } from '@shared/constants';
 import type { PairingInfo, Settings } from '@shared/types';
 import { parseServerMessage } from '@shared/protocol';
+import { normalizeBridgeUrl } from '@shared/url-utils';
 import type { SettingsStore } from './services/settings-store';
 
 export interface PairTestResult {
@@ -35,9 +36,12 @@ export async function testPairing(info: PairingInfo): Promise<PairTestResult> {
       resolve(r);
     };
 
+    const { url: effectiveUrl, pathWasAdded } = normalizeBridgeUrl(info.url);
+    if (pathWasAdded) log.info('[VG] pair test: appended /ws to URL', effectiveUrl);
+
     let ws: WebSocket;
     try {
-      ws = new WebSocket(info.url, {
+      ws = new WebSocket(effectiveUrl, {
         headers: { Authorization: `Bearer ${info.token}` },
         handshakeTimeout: PAIR_TIMEOUT_MS,
       });
@@ -91,6 +95,14 @@ export async function testPairing(info: PairingInfo): Promise<PairTestResult> {
       clearTimeout(timer);
       if (res.statusCode === 401 || res.statusCode === 403) {
         done({ ok: false, message: 'O token não foi aceite. Verifica se o copiaste sem espaços.' });
+        return;
+      }
+      if (res.statusCode === 404) {
+        done({
+          ok: false,
+          message:
+            'O servidor respondeu mas não há um bridge nesse endereço. Confirma que o URL termina em /ws (ex: ws://host:8765/ws).',
+        });
         return;
       }
       done({
