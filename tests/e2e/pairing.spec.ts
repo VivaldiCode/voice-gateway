@@ -63,7 +63,8 @@ test.describe('PairingWizard E2E', () => {
 
       await expect(page.getByTestId('pairing-done')).toBeVisible({ timeout: 5_000 });
       await page.getByTestId('open-app').click();
-      await expect(page.getByTestId('main-ready')).toBeVisible();
+      await expect(page.getByTestId('call-button')).toBeVisible();
+      await expect(page.getByTestId('connection-indicator')).toContainText(/ligado|sem ligação/i);
     } finally {
       await app.close();
     }
