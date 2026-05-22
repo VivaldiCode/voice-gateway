@@ -2,6 +2,7 @@ appId: dev.voicegateway.app
 productName: Voice Gateway
 copyright: Copyright © 2026 Voice Gateway contributors
 asar: false
+afterPack: build/after-pack.cjs
 directories:
   output: release
   buildResources: resources

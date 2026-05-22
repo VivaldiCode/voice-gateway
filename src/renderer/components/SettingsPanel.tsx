@@ -72,6 +72,7 @@ export function SettingsPanel({
             key={id}
             type="button"
             onClick={() => setTab(id)}
+            data-testid={`tab-${id}`}
             className={cn(
               'flex items-center gap-2 rounded px-3 py-2 transition',
               tab === id ? 'bg-bg-subtle text-white' : 'text-zinc-400 hover:text-white',
@@ -265,16 +266,25 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
         <VuMeter level={level} active={testing} />
         <div className="flex gap-2">
           {testing ? (
-            <Button variant="danger" onClick={stopTest}>
+            <Button variant="danger" onClick={stopTest} data-testid="mic-stop-test">
               Parar
             </Button>
           ) : (
-            <Button onClick={() => void startTest()}>
+            <Button onClick={() => void startTest()} data-testid="mic-start-test">
               <Play className="mr-1 h-4 w-4" />
               Começar teste
             </Button>
           )}
         </div>
+        {error && (
+          <p
+            role="alert"
+            data-testid="mic-test-error"
+            className="text-xs text-red-300"
+          >
+            {error}
+          </p>
+        )}
       </Section>
     </div>
   );
@@ -289,16 +299,22 @@ function MicPermissionCard({
   onRequest: () => void;
   onOpenSettings: () => void;
 }): JSX.Element {
+  const wrapper = (children: JSX.Element): JSX.Element => (
+    <div data-testid="mic-permission" data-status={status}>
+      {children}
+    </div>
+  );
   if (status === 'granted') {
-    return (
+    return wrapper(
       <div className="rounded-xl border border-green-800/60 bg-green-950/30 px-3 py-2 text-xs text-green-200">
         ✓ O macOS está a dar acesso ao microfone à Voice Gateway.
-      </div>
+      </div>,
     );
   }
   if (status === 'denied' || status === 'restricted') {
-    return (
+    return wrapper(
       <div className="flex flex-col gap-2 rounded-xl border border-red-800 bg-red-950/40 px-3 py-3 text-xs text-red-100">
+
         <p>
           O macOS está a <strong>negar</strong> o microfone à Voice Gateway. A
           permissão tem de ser concedida no painel do Sistema — abre-o e ativa
@@ -307,11 +323,11 @@ function MicPermissionCard({
         <Button size="sm" onClick={onOpenSettings}>
           Abrir Definições do Sistema
         </Button>
-      </div>
+      </div>,
     );
   }
   if (status === 'not-determined') {
-    return (
+    return wrapper(
       <div className="flex flex-col gap-2 rounded-xl border border-yellow-800 bg-yellow-950/30 px-3 py-3 text-xs text-yellow-100">
         <p>O macOS ainda não pediu a tua autorização para o microfone.</p>
         <div className="flex gap-2">
@@ -322,14 +338,14 @@ function MicPermissionCard({
             Abrir Definições do Sistema
           </Button>
         </div>
-      </div>
+      </div>,
     );
   }
   // unknown / non-mac
-  return (
+  return wrapper(
     <div className="rounded-xl border border-bg-subtle bg-bg-panel/60 px-3 py-2 text-xs text-zinc-300">
       Estado da permissão: <span className="font-mono">{status}</span>
-    </div>
+    </div>,
   );
 }
 
@@ -337,7 +353,12 @@ function VuMeter({ level, active }: { level: number; active: boolean }): JSX.Ele
   // Visual mapping: RMS often peaks around 0.1-0.3 for normal speech.
   const pct = Math.min(100, Math.round(level * 240));
   return (
-    <div className="flex flex-col gap-1">
+    <div
+      className="flex flex-col gap-1"
+      data-testid="vu-meter"
+      data-level={level.toFixed(4)}
+      data-active={active ? '1' : '0'}
+    >
       <div className="relative h-4 w-full overflow-hidden rounded-full bg-bg-subtle">
         <div
           className={cn(
