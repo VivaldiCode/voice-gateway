@@ -121,10 +121,30 @@ class HermesAdapter:
                         raise HermesUpstreamError(
                             f"hermes returned {resp.status}: {body[:200]}"
                         )
+                    content_type = (resp.headers.get("Content-Type") or "").lower()
+                    log.info("hermes responded 200 (Content-Type=%s)", content_type)
+                    delta_count = 0
                     async for delta in _iter_sse_deltas(resp):
                         if delta:
+                            delta_count += 1
                             buffered.append(delta)
                             yield delta
+                    log.info(
+                        "hermes stream done — %d delta(s), %d chars total",
+                        delta_count,
+                        sum(len(b) for b in buffered),
+                    )
+                    if delta_count == 0:
+                        # Streaming endpoint returned a 200 but emitted no deltas.
+                        # Either Hermes ignored stream=true (returned a single
+                        # JSON body) or replied with an empty body. Re-read with
+                        # a JSON fallback to recover the message.
+                        # (Note: most aiohttp impls disallow reading body twice;
+                        # we silently no-op here and log the gap.)
+                        log.warning(
+                            "hermes stream produced zero deltas — check that the"
+                            " server actually streams /v1/chat/completions"
+                        )
         finally:
             full = "".join(buffered).strip()
             if full:
@@ -136,41 +156,69 @@ class HermesAdapter:
 async def _iter_sse_deltas(resp: aiohttp.ClientResponse) -> AsyncIterator[str]:
     """Parse an OpenAI-compatible SSE chat-completions stream into text deltas.
 
-    Accepts both proper SSE (`data: ...` prefix) and plain newline-delimited
-    JSON, since some proxies strip the prefix. Yields the empty string when
-    the upstream sends a finish_reason without delta content.
+    The previous implementation iterated `resp.content` directly, which yields
+    arbitrary TCP-sized byte chunks — a single `data: {...}\\n\\n` event could
+    be split across two chunks and decoded as two malformed half-lines. We now
+    keep an internal byte buffer and only emit a line once we've seen the
+    terminating newline. Accepts:
+
+      - proper SSE  ('data: ...\\n\\n', terminated by 'data: [DONE]\\n\\n')
+      - newline-delimited JSON (some proxies strip the 'data:' prefix)
+      - free-text deltas (legacy/tolerant fallback)
     """
-    async for raw in resp.content:
-        line = raw.decode("utf-8", errors="replace").strip()
-        if not line:
+    buffer = b""
+    async for chunk in resp.content.iter_any():
+        if not chunk:
             continue
-        if line.startswith("data:"):
-            line = line[len("data:") :].strip()
-        if line in ("", "[DONE]"):
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            # Some Hermes builds emit plain text deltas without JSON wrapping.
-            yield line
-            continue
-        if not isinstance(obj, dict):
-            continue
-        # OpenAI chat.completion.chunk shape:
-        #   {"choices": [{"delta": {"content": "..."}, "finish_reason": ...}]}
-        choices = obj.get("choices")
-        if isinstance(choices, list) and choices:
-            choice = choices[0]
-            if isinstance(choice, dict):
-                delta = choice.get("delta") or choice.get("message")
-                if isinstance(delta, dict):
-                    content = delta.get("content")
-                    if isinstance(content, str) and content:
-                        yield content
-                        continue
-        # Fall through for non-OpenAI-shaped payloads (older / tolerant path):
-        for key in ("delta", "text", "content"):
-            v = obj.get(key)
-            if isinstance(v, str) and v:
-                yield v
-                break
+        buffer += chunk
+        while b"\n" in buffer:
+            raw_line, buffer = buffer.split(b"\n", 1)
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\r").strip()
+            if not line:
+                continue
+            log.debug("hermes SSE: %s", line[:160])
+            if line.startswith("data:"):
+                line = line[len("data:") :].strip()
+            if line in ("", "[DONE]"):
+                continue
+            yielded = _extract_delta(line)
+            if yielded:
+                yield yielded
+    # Flush any tail without a trailing newline (some servers terminate the
+    # stream without one).
+    tail = buffer.decode("utf-8", errors="replace").strip()
+    if tail:
+        log.debug("hermes SSE tail: %s", tail[:160])
+        if tail.startswith("data:"):
+            tail = tail[len("data:") :].strip()
+        if tail and tail != "[DONE]":
+            yielded = _extract_delta(tail)
+            if yielded:
+                yield yielded
+
+
+def _extract_delta(line: str) -> Optional[str]:
+    """Pull the assistant text out of one already-trimmed SSE payload."""
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return line
+    if not isinstance(obj, dict):
+        return None
+    # OpenAI chat.completion.chunk shape:
+    #   {"choices": [{"delta": {"content": "..."}, "finish_reason": ...}]}
+    choices = obj.get("choices")
+    if isinstance(choices, list) and choices:
+        choice = choices[0]
+        if isinstance(choice, dict):
+            delta = choice.get("delta") or choice.get("message")
+            if isinstance(delta, dict):
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    return content
+    # Fall through for non-OpenAI shapes.
+    for key in ("delta", "text", "content"):
+        v = obj.get(key)
+        if isinstance(v, str) and v:
+            return v
+    return None

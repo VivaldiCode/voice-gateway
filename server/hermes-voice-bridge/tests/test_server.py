@@ -289,6 +289,38 @@ async def test_hermes_adapter_friendly_401_message_without_key(aiohttp_server) -
             pass
 
 
+async def test_hermes_adapter_handles_packets_split_mid_line(
+    aiohttp_server,
+) -> None:
+    """Real Hermes streams over TCP — a single SSE event can straddle two
+    response chunks. The adapter must buffer until newline, not decode each
+    chunk in isolation."""
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        resp = web.StreamResponse(
+            status=200, headers={"Content-Type": "text/event-stream"}
+        )
+        await resp.prepare(request)
+        # Split a 'data: {...}\n\n' across three writes at non-newline
+        # boundaries to provoke the previous parser's failure mode.
+        payload = (
+            b'data: {"choices":[{"delta":{"content":"split test "}}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"works."}}]}\n\n'
+            b"data: [DONE]\n\n"
+        )
+        for start in range(0, len(payload), 7):
+            await resp.write(payload[start : start + 7])
+        await resp.write_eof()
+        return resp
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", handler)
+    server = await aiohttp_server(app)
+    adapter = HermesAdapter(f"http://127.0.0.1:{server.port}", request_timeout=5)
+    deltas = [d async for d in adapter.stream_chat(text="x")]
+    assert "".join(deltas) == "split test works."
+
+
 def test_config_parses_optional_api_key() -> None:
     cfg = BridgeConfig.from_dict(
         {"bridge": {"token": "x"}, "hermes": {"api_key": "  sk-xyz  "}}
