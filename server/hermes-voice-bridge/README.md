@@ -24,7 +24,7 @@ the WS server only depends on that contract.
 Use the top-level installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<user>/voice-gateway/main/server/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh | bash
 ```
 
 The installer creates a virtualenv at `/opt/hermes-voice-bridge`, writes

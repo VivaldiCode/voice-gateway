@@ -19,13 +19,13 @@ End-to-end installation, from a fresh Hermes server to a working voice conversat
 On the Hermes server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<user>/voice-gateway/main/server/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh | bash
 ```
 
 Or from a checkout:
 
 ```bash
-git clone https://github.com/<user>/voice-gateway
+git clone https://github.com/VivaldiCode/voice-gateway
 sudo bash voice-gateway/server/install.sh
 ```
 
@@ -65,7 +65,7 @@ If your Hermes is shaped differently, edit `/opt/hermes-voice-bridge/src/hermes_
 ## Step 2 — Install the desktop app
 
 ```bash
-git clone https://github.com/<user>/voice-gateway
+git clone https://github.com/VivaldiCode/voice-gateway
 cd voice-gateway
 npm install
 npm run build:mac        # creates release/*.dmg

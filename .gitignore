@@ -19,3 +19,5 @@ resources/piper/models/
 server/hermes-voice-bridge/.venv/
 __pycache__/
 *.pyc
+.idea/
+.vscode/

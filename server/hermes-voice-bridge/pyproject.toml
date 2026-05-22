@@ -9,7 +9,12 @@ description = "WebSocket bridge from Voice Gateway desktop app to the Hermes age
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Voice Gateway contributors" }]
+authors = [{ name = "VivaldiCode" }]
+
+[project.urls]
+Homepage = "https://github.com/VivaldiCode/voice-gateway"
+Repository = "https://github.com/VivaldiCode/voice-gateway.git"
+Issues = "https://github.com/VivaldiCode/voice-gateway/issues"
 dependencies = [
   "aiohttp>=3.10,<4",
   "tomli; python_version<'3.11'",

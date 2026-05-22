@@ -122,7 +122,7 @@ if [[ ! -d "$SRC_PKG" ]]; then
   # Allow piped install: clone into a temp dir.
   warn "package sources not co-located; cloning repository"
   TMPDIR=$(mktemp -d)
-  git clone --depth=1 https://github.com/anthropics/voice-gateway "$TMPDIR" 2>/dev/null \
+  git clone --depth=1 https://github.com/VivaldiCode/voice-gateway "$TMPDIR" 2>/dev/null \
     || fail "git clone failed; pass --src-dir or run from a checkout"
   SRC_PKG="$TMPDIR/server/hermes-voice-bridge"
 fi

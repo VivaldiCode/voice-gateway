@@ -4,8 +4,16 @@
   "description": "Voice gateway for the Hermes agent — local-first STT/TTS with optional cloud upgrades.",
   "main": "out/main/index.js",
   "type": "module",
-  "author": "Voice Gateway contributors",
+  "author": "VivaldiCode",
   "license": "MIT",
+  "homepage": "https://github.com/VivaldiCode/voice-gateway",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VivaldiCode/voice-gateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/VivaldiCode/voice-gateway/issues"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

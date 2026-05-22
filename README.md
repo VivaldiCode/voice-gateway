@@ -20,7 +20,7 @@ Talk to your self-hosted [Hermes agent](https://hermes-agent.nousresearch.com/) 
 ### 1. Install the bridge on your Hermes server (Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<user>/voice-gateway/main/server/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh | bash
 ```
 
 The script is interactive: it prompts for the bridge port (default `8765`) and your local Hermes API URL (default `http://localhost:8000`). At the end it prints a one-line **pairing token** — keep it handy.
@@ -28,7 +28,7 @@ The script is interactive: it prompts for the bridge port (default `8765`) and y
 ### 2. Install the desktop app
 
 ```bash
-git clone https://github.com/<user>/voice-gateway.git
+git clone https://github.com/VivaldiCode/voice-gateway.git
 cd voice-gateway
 npm install
 npm run build:mac     # or build:linux / build:win
