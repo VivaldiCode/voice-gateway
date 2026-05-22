@@ -120,36 +120,27 @@ export class PiperAdapter extends EventEmitter implements TtsAdapter {
   }
 
   /**
-   * Best-effort setup: discover (or brew-install) the binary, then download
-   * the .onnx + .onnx.json files for the configured voice from Hugging Face.
-   * Emits TtsProgressEvent at each step.
+   * Best-effort setup: discover the binary anywhere on disk, otherwise create
+   * a self-contained Python venv at <userData>/piper/venv and `pip install
+   * piper-tts` into it. Then download the .onnx + .onnx.json files for the
+   * configured voice from Hugging Face.
+   *
+   * piper-tts has no Homebrew formula; the canonical install path is PyPI
+   * (https://pypi.org/project/piper-tts/). We isolate it in a venv so the
+   * user's system Python stays untouched.
    */
   async prepare(onProgress?: (p: TtsProgressEvent) => void): Promise<void> {
     await fs.mkdir(this.voicesDir, { recursive: true });
 
     let bin = await this.discoverBinary();
-    if (!bin && this.autoInstall && process.platform === 'darwin') {
-      const brew = await this.whichImpl('brew');
-      if (brew) {
-        onProgress?.({ stage: 'installing', fraction: null, detail: 'brew install piper-tts' });
-        try {
-          await this.runProcess(brew, ['install', 'piper-tts']);
-        } catch {
-          // Some homebrew taps name the formula just "piper".
-          try {
-            await this.runProcess(brew, ['install', 'piper']);
-          } catch {
-            // ignore — handled below by the not-found branch
-          }
-        }
-        bin = await this.discoverBinary();
-      }
+    if (!bin && this.autoInstall) {
+      bin = await this.tryAutoInstall(onProgress);
     }
     if (!bin) {
       throw new Error(
-        process.platform === 'darwin'
-          ? 'Piper local não está instalado. No terminal: `brew install piper-tts`. (Ou escolhe ElevenLabs em Definições > Voz.)'
-          : 'Piper local não está instalado. Instala `piper-tts` (ex.: `pip install piper-tts`) ou escolhe ElevenLabs em Definições > Voz.',
+        'Piper não está instalado. ' +
+          'Forma simples: `pip3 install --user piper-tts` no terminal. ' +
+          'Ou escolhe ElevenLabs em Definições > Voz.',
       );
     }
 
@@ -188,10 +179,11 @@ export class PiperAdapter extends EventEmitter implements TtsAdapter {
     this.stop();
     this.seq = 0;
 
+    // piper-tts >= 1.2 uses dash-separated flags; older versions accept both.
     const args = [
       '--model', this.modelPath(),
-      '--output_raw',
-      '--sentence_silence', '0.2',
+      '--output-raw',
+      '--sentence-silence', '0.2',
     ];
     const proc = this.spawnImpl(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.current = proc;
@@ -220,6 +212,64 @@ export class PiperAdapter extends EventEmitter implements TtsAdapter {
       }
       this.current = null;
     }
+  }
+
+  /**
+   * Create a venv at <userData>/piper/venv and install piper-tts into it.
+   * Returns the resolved binary path on success, null on failure (caller
+   * surfaces the friendly error). Stdout/stderr of pip is sent to
+   * electron-log so a power user can grep ~/Library/Logs/.
+   */
+  private async tryAutoInstall(
+    onProgress?: (p: TtsProgressEvent) => void,
+  ): Promise<string | null> {
+    const venvDir = join(safeUserDataPath(), 'piper', 'venv');
+    const venvBin = join(venvDir, 'bin', process.platform === 'win32' ? 'piper.exe' : 'piper');
+
+    const python3 = await this.whichImpl('python3');
+    if (!python3) {
+      log.warn('[VG] piper auto-install: no python3 on PATH');
+      return null;
+    }
+
+    onProgress?.({ stage: 'installing', fraction: null, detail: 'a criar venv para piper-tts' });
+    try {
+      // Re-creating an existing venv is harmless and recovers from
+      // half-built ones (e.g. from an aborted install).
+      await fs.rm(venvDir, { recursive: true, force: true });
+      await fs.mkdir(dirname(venvDir), { recursive: true });
+      await this.runProcess(python3, ['-m', 'venv', venvDir]);
+    } catch (err) {
+      log.warn('[VG] piper auto-install: venv creation failed', err);
+      return null;
+    }
+
+    const venvPip = join(venvDir, 'bin', process.platform === 'win32' ? 'pip.exe' : 'pip');
+    onProgress?.({ stage: 'installing', fraction: null, detail: 'pip install --upgrade pip wheel' });
+    try {
+      await this.runProcess(venvPip, ['install', '--quiet', '--upgrade', 'pip', 'wheel']);
+    } catch (err) {
+      log.warn('[VG] piper auto-install: pip self-upgrade failed', err);
+      // Non-fatal; older pip can still install piper-tts.
+    }
+
+    onProgress?.({ stage: 'installing', fraction: null, detail: 'pip install piper-tts' });
+    try {
+      await this.runProcess(venvPip, ['install', '--quiet', '--upgrade', 'piper-tts']);
+    } catch (err) {
+      log.warn('[VG] piper auto-install: pip install piper-tts failed', err);
+      return null;
+    }
+
+    try {
+      await fs.access(venvBin);
+    } catch {
+      log.warn('[VG] piper auto-install: binary not at', venvBin);
+      return null;
+    }
+    this.resolvedBinary = venvBin;
+    log.info('[VG] piper auto-installed at', venvBin);
+    return venvBin;
   }
 
   private runProcess(bin: string, args: string[]): Promise<string> {

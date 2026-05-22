@@ -17,6 +17,10 @@ extraResources:
     to: piper
     filter:
       - "**/*"
+  - from: resources/scripts
+    to: scripts
+    filter:
+      - "**/*.sh"
   - from: resources/icon.png
     to: icon.png
   - from: resources/icon.svg

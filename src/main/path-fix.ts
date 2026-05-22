@@ -27,6 +27,13 @@ export function ensureUserShellPath(): void {
   const home = process.env['HOME'];
   if (home) {
     extras.push(`${home}/.local/bin`, `${home}/bin`);
+    // macOS `pip3 install --user` lands here. Cover the LTS Python versions
+    // so a `pip install --user piper-tts` is automatically discoverable.
+    if (process.platform === 'darwin') {
+      for (const v of ['3.14', '3.13', '3.12', '3.11', '3.10']) {
+        extras.push(`${home}/Library/Python/${v}/bin`);
+      }
+    }
   }
 
   const existing = (process.env['PATH'] ?? '').split(':').filter(Boolean);
