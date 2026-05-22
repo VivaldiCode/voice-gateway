@@ -75,6 +75,17 @@ const api = {
     onTestChunk: (
       cb: (c: { seq: number; format: string; data: string; done?: boolean }) => void,
     ): (() => void) => on(IPC.AUDIO_TEST_TTS_CHUNK, cb),
+    prepare: (): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke(IPC.TTS_PREPARE),
+    onStatus: (
+      cb: (
+        s:
+          | { state: 'idle' }
+          | { state: 'preparing'; progress?: { stage: string; fraction: number | null; detail?: string } }
+          | { state: 'ready' }
+          | { state: 'error'; message: string },
+      ) => void,
+    ): (() => void) => on(IPC.TTS_STATUS, cb),
   },
 } as const;
 

@@ -11,6 +11,7 @@ import { createTtsAdapter } from './services/tts-service';
 import { ConversationOrchestrator } from './services/conversation-orchestrator';
 import { WakeWordService } from './services/wake-word-service';
 import type { SttAdapter, ProgressEvent as SttProgress } from './services/stt-service';
+import type { TtsAdapter, TtsProgressEvent } from './services/tts-service';
 import { createTray } from './tray';
 import { registerHotkey } from './global-shortcut';
 import { resolveResource } from './asset-paths';
@@ -26,7 +27,15 @@ log.info('[VG] main process boot');
 const settings = createSettingsStore();
 let mainWindow: BrowserWindow | null = null;
 const getMainWindow = (): BrowserWindow | null => mainWindow;
-const unregisterIpc = registerIpcHandlers(settings, getMainWindow);
+const unregisterIpc = registerIpcHandlers(settings, getMainWindow, async () => {
+  if (!activeTts) return { ok: false, message: 'TTS adapter not initialised yet.' };
+  try {
+    await prepareTts(activeTts);
+    return { ok: ttsStatus.state === 'ready' };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'erro desconhecido' };
+  }
+});
 app.on('will-quit', () => unregisterIpc());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,12 +55,16 @@ let wake: WakeWordService | null = null;
 // settings change, surface the adapter to a "test recognition" button, etc)
 // don't need plumbing.
 let _activeStt: SttAdapter | null = null;
-type SttStatus =
+let activeTts: TtsAdapter | null = null;
+type PrepareStatus<P> =
   | { state: 'idle' }
-  | { state: 'preparing'; progress?: SttProgress }
+  | { state: 'preparing'; progress?: P }
   | { state: 'ready' }
   | { state: 'error'; message: string };
+type SttStatus = PrepareStatus<SttProgress>;
+type TtsStatus = PrepareStatus<TtsProgressEvent>;
 let sttStatus: SttStatus = { state: 'idle' };
+let ttsStatus: TtsStatus = { state: 'idle' };
 
 function send(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
@@ -60,6 +73,11 @@ function send(channel: string, payload: unknown): void {
 function setSttStatus(next: SttStatus): void {
   sttStatus = next;
   send(IPC.STT_STATUS, next);
+}
+
+function setTtsStatus(next: TtsStatus): void {
+  ttsStatus = next;
+  send(IPC.TTS_STATUS, next);
 }
 
 async function prepareStt(stt: SttAdapter): Promise<void> {
@@ -83,6 +101,32 @@ async function prepareStt(stt: SttAdapter): Promise<void> {
   }
 }
 
+async function prepareTts(tts: TtsAdapter): Promise<void> {
+  if (!tts.prepare) {
+    // ElevenLabs etc. have no preparation step.
+    setTtsStatus((await tts.isReady()) ? { state: 'ready' } : { state: 'idle' });
+    return;
+  }
+  if (await tts.isReady()) {
+    setTtsStatus({ state: 'ready' });
+    return;
+  }
+  setTtsStatus({ state: 'preparing' });
+  try {
+    await tts.prepare((p) => {
+      ttsStatus = { state: 'preparing', progress: p };
+      send(IPC.TTS_STATUS, ttsStatus);
+      send(IPC.TTS_PROGRESS, p);
+    });
+    setTtsStatus({ state: 'ready' });
+    log.info('[VG] tts ready');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'erro desconhecido';
+    log.warn('[VG] tts prepare failed:', message);
+    setTtsStatus({ state: 'error', message });
+  }
+}
+
 function bootstrapConversation(): void {
   const s = settings.get();
   if (!s.pairing) return;
@@ -92,12 +136,15 @@ function bootstrapConversation(): void {
   }
   client = new HermesClient();
   // autoInstall: true so a fresh macOS install can self-bootstrap whisper.cpp
-  // via Homebrew on first use, without bouncing the user back to a terminal.
+  // and piper-tts via Homebrew on first use, without bouncing the user back
+  // to a terminal.
   const stt = createSttAdapter(s.stt, { autoInstall: true });
   _activeStt = stt;
-  const tts = createTtsAdapter(s.tts);
+  const tts = createTtsAdapter(s.tts, { autoInstall: true });
+  activeTts = tts;
   orchestrator = new ConversationOrchestrator(client, stt, tts, s);
   void prepareStt(stt);
+  void prepareTts(tts);
 
   client.on('status', (status, info) => {
     send(IPC.CONNECTION_STATUS, { status, ...info });
@@ -189,9 +236,10 @@ function createMainWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => {
     win.show();
-    // Resend the current STT status to the freshly-loaded renderer so it
-    // never starts with a stale "preparing…" UI on second window opens.
+    // Resend the current STT + TTS status to the freshly-loaded renderer so
+    // it never starts with a stale "preparing…" UI on second window opens.
     send(IPC.STT_STATUS, sttStatus);
+    send(IPC.TTS_STATUS, ttsStatus);
   });
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;

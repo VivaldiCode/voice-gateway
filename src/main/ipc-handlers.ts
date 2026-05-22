@@ -8,6 +8,8 @@ import { normalizeBridgeUrl } from '@shared/url-utils';
 import type { SettingsStore } from './services/settings-store';
 import { ElevenLabsAdapter, PiperAdapter, type TtsAdapter } from './services/tts-service';
 
+export type PrepareTtsCallback = () => Promise<{ ok: boolean; message?: string }>;
+
 export interface PairTestResult {
   ok: boolean;
   /** Human-friendly Portuguese message. */
@@ -290,6 +292,7 @@ export async function testVoice(
 export function registerIpcHandlers(
   settings: SettingsStore,
   getWindow: () => BrowserWindow | null,
+  prepareTts: PrepareTtsCallback = async () => ({ ok: true }),
 ): () => void {
   const handlers: Array<[string, Parameters<typeof ipcMain.handle>[1]]> = [
     [IPC.PING, async () => 'pong' as const],
@@ -316,6 +319,7 @@ export function registerIpcHandlers(
           getWindow()?.webContents.send(IPC.AUDIO_TEST_TTS_CHUNK, chunk);
         }),
     ],
+    [IPC.TTS_PREPARE, async () => prepareTts()],
   ];
 
   for (const [channel, handler] of handlers) {

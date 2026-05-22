@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Volume2, Mic2, Cable, Sliders, AlertTriangle, RefreshCw, Loader2, Play } from 'lucide-react';
+import { Volume2, Mic2, Cable, Sliders, AlertTriangle, RefreshCw, Loader2, Play, Download } from 'lucide-react';
 import { Button } from './Button';
 import { CommandHint } from './CommandHint';
 import { cn } from '../lib/cn';
@@ -16,7 +16,8 @@ import type {
   SttProvider,
   TtsProvider,
 } from '../../shared/types';
-import type { VoiceInfo } from '../global';
+import { PIPER_VOICES } from '../../shared/piper-voices';
+import type { TtsStatus, VoiceInfo } from '../global';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 
 type Tab = 'voz' | 'reconhecimento' | 'ativacao' | 'conexao' | 'avancado';
@@ -96,14 +97,23 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
   const [elKey, setElKey] = useState(settings.tts.elevenlabs.apiKey);
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
   const [voiceId, setVoiceId] = useState(settings.tts.elevenlabs.voiceId);
+  const [piperVoiceId, setPiperVoiceId] = useState(settings.tts.piper.modelId);
   const [loadingVoices, setLoadingVoices] = useState(false);
   const [voicesError, setVoicesError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
+  const [ttsStatus, setTtsStatus] = useState<TtsStatus>({ state: 'idle' });
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    const off = window.vg.tts.onStatus(setTtsStatus);
+    return off;
+  }, []);
 
   type TtsPatch = {
     provider?: TtsProvider;
     elevenlabs?: Partial<ElevenLabsConfig>;
+    piper?: { modelId?: string };
   };
   const persist = useCallback(
     (patch: TtsPatch) => {
@@ -112,11 +122,21 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
           ...settings.tts,
           ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
           elevenlabs: { ...settings.tts.elevenlabs, ...(patch.elevenlabs ?? {}) },
+          piper: { ...settings.tts.piper, ...(patch.piper ?? {}) },
         },
       });
     },
     [settings.tts],
   );
+
+  const downloadPiperVoice = useCallback(async () => {
+    setDownloading(true);
+    try {
+      await window.vg.tts.prepare();
+    } finally {
+      setDownloading(false);
+    }
+  }, []);
 
   const loadVoices = useCallback(async () => {
     if (!elKey.trim()) {
@@ -192,6 +212,39 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
         />
       </Section>
 
+      {provider === 'piper_local' && (
+        <>
+          <Section title="Voz Piper">
+            <select
+              value={piperVoiceId}
+              onChange={(e) => {
+                setPiperVoiceId(e.target.value);
+                persist({ piper: { modelId: e.target.value } });
+              }}
+              className="h-10 w-full rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+            >
+              {PIPER_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label} (~{v.sizeMb} MB)
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-zinc-500">
+              A voz é descarregada da Hugging Face à primeira utilização e fica
+              guardada localmente.
+            </p>
+          </Section>
+
+          <Section title="Estado da voz">
+            <PiperPrepareCard
+              status={ttsStatus}
+              downloading={downloading}
+              onDownload={downloadPiperVoice}
+            />
+          </Section>
+        </>
+      )}
+
       {provider === 'elevenlabs' && (
         <>
           <Section title="Chave API da ElevenLabs">
@@ -252,7 +305,12 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
 
       <Section title="Testar voz">
         <div className="flex items-center gap-2">
-          <Button onClick={onTest} loading={testing} size="md">
+          <Button
+            onClick={onTest}
+            loading={testing}
+            size="md"
+            disabled={provider === 'piper_local' && ttsStatus.state !== 'ready'}
+          >
             <Play className="mr-1 h-4 w-4" />
             {testing ? 'a sintetizar…' : 'Reproduzir amostra'}
           </Button>
@@ -260,6 +318,59 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
         </div>
         {testError && <CommandHint message={testError} variant="error" />}
       </Section>
+    </div>
+  );
+}
+
+function PiperPrepareCard({
+  status,
+  downloading,
+  onDownload,
+}: {
+  status: TtsStatus;
+  downloading: boolean;
+  onDownload: () => void;
+}): JSX.Element {
+  if (status.state === 'ready') {
+    return (
+      <div className="rounded-xl border border-green-800/60 bg-green-950/30 px-3 py-2 text-xs text-green-200">
+        ✓ Voz Piper pronta. Carrega <em>Reproduzir amostra</em> abaixo para
+        confirmar.
+      </div>
+    );
+  }
+  if (status.state === 'preparing') {
+    const p = status.progress;
+    const pct = p?.fraction != null ? Math.round(p.fraction * 100) : null;
+    const label =
+      p?.stage === 'installing'
+        ? p.detail ?? 'a instalar dependências'
+        : p?.stage === 'downloading'
+          ? `a descarregar ${p.detail ?? 'voz'}`
+          : 'a preparar voz';
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-bg-subtle bg-bg/60 px-3 py-2 text-xs text-zinc-300">
+        <div className="flex items-center justify-between">
+          <span>{label}…</span>
+          {pct != null && <span className="font-mono text-accent">{pct}%</span>}
+        </div>
+        <div className="h-1 overflow-hidden rounded-full bg-bg-subtle">
+          <div
+            className="h-full rounded-full bg-accent transition-all"
+            style={{ width: pct != null ? `${pct}%` : '40%' }}
+          />
+        </div>
+      </div>
+    );
+  }
+  // idle or error
+  return (
+    <div className="flex flex-col gap-2">
+      {status.state === 'error' && <CommandHint message={status.message} variant="error" />}
+      <Button onClick={onDownload} loading={downloading}>
+        <Download className="mr-1 h-4 w-4" />
+        {status.state === 'error' ? 'Tentar de novo' : 'Descarregar voz agora'}
+      </Button>
     </div>
   );
 }

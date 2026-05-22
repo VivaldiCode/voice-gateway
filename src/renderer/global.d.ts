@@ -35,6 +35,13 @@ export type SttStatus =
   | { state: 'ready' }
   | { state: 'error'; message: string };
 
+export type TtsProgress = SttProgress;
+export type TtsStatus =
+  | { state: 'idle' }
+  | { state: 'preparing'; progress?: TtsProgress }
+  | { state: 'ready' }
+  | { state: 'error'; message: string };
+
 interface VgApi {
   ping: () => Promise<'pong'>;
   settings: {
@@ -78,6 +85,8 @@ interface VgApi {
     onTestChunk: (
       cb: (c: { seq: number; format: string; data: string; done?: boolean }) => void,
     ) => () => void;
+    prepare: () => Promise<{ ok: boolean; message?: string }>;
+    onStatus: (cb: (s: TtsStatus) => void) => () => void;
   };
 }
 
