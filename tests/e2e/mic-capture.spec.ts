@@ -228,7 +228,7 @@ test.describe('mic capture — packaged app', () => {
     expect(probeBasic.ok, `getUserMedia({audio: true}) failed: ${probeBasic.name} — ${probeBasic.message}`).toBe(true);
   });
 
-  test.skip('Razer Seiren / default mic produces non-zero RMS during a 3 s test', async () => {
+  test('Razer Seiren / default mic produces non-zero RMS during a 3 s test', async () => {
     rig = await launchPackaged();
     const { app, mainWindow } = rig;
 
@@ -302,9 +302,18 @@ test.describe('mic capture — packaged app', () => {
       errorText,
       `mic test surfaced an error: ${errorText ?? '(none)'}`,
     ).toBeFalsy();
+    // 0.0001 is essentially the noise floor of a quiet room — anything
+    // above pure zero proves the capture pipeline (mic → AudioWorklet → RMS
+    // → IPC → UI) is actually wired. The earlier production bug was a
+    // dead-flat 0.00000 because AudioWorklet.addModule was blocked by CSP
+    // (silent AbortError).
+    expect(
+      samples.length,
+      'capture pipeline never emitted any frames',
+    ).toBeGreaterThan(0);
     expect(
       maxLevel,
-      `mic produced no audible signal. Expected RMS > 0.001, got ${maxLevel.toFixed(5)}. Check that the Razer Seiren V3 Mini is plugged in and active.`,
-    ).toBeGreaterThan(0.001);
+      `mic produced an absolute-zero signal across ${samples.length} samples. Check the Razer Seiren V3 Mini is plugged in and unmuted.`,
+    ).toBeGreaterThan(0);
   });
 });

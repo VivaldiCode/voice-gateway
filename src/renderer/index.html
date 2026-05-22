@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss: https:; media-src 'self' blob:;" />
+    <!-- script-src must allow blob: so AudioWorklet.addModule(blobUrl) is not
+         blocked by CSP — the PCM downsampler worklet in audio-capture.ts is
+         shipped inline and loaded via a blob URL. worker-src/blob: lets us do
+         the same for any WebWorker we add later. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss: https:; media-src 'self' blob:;" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="alternate icon" type="image/png" href="/favicon-32.png" />
     <title>Voice Gateway</title>

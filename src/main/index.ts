@@ -19,6 +19,22 @@ import { ensureUserShellPath } from './path-fix';
 
 ensureUserShellPath();
 
+// macOS TCC binds the microphone permission to the *process* that opens the
+// audio device. With Chromium's default sandbox, audio capture runs in an
+// out-of-process "Audio Service" helper whose bundle id is distinct from the
+// main app (dev.voicegateway.app.helper). Users grant permission to the
+// main app in System Settings → Privacy → Microphone, but the audio service
+// helper is a different TCC subject and its check silently fails — surfacing
+// as 'The user aborted a request' (AbortError) or an indefinite hang.
+//
+// Folding the audio service into the browser process makes the OS-level
+// permission check run against the main app's bundle id, which the user has
+// already granted. This trade-off (no audio-service sandbox) is acceptable
+// for a desktop assistant where every audio path is already trusted code.
+//
+// MUST be set BEFORE app.whenReady so Chromium picks it up at startup.
+app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess,AudioServiceSandbox');
+
 log.initialize();
 log.transports.file.level = 'info';
 log.transports.console.level = 'debug';
