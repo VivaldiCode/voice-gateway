@@ -67,6 +67,14 @@ export interface ActivationSettings {
   globalHotkey: string;
   vadThreshold: number;
   vadSilenceMs: number;
+  /**
+   * Minimum captured audio duration in milliseconds before we send to STT.
+   * Anything shorter is treated as an accidental tap and we silently return
+   * to IDLE with a friendly warning. Prevents OpenAI/Whisper from rejecting
+   * <100ms clips, and stops accidental double-clicks from spamming
+   * transcription.
+   */
+  minAudioMs: number;
 }
 
 export interface AudioSettings {

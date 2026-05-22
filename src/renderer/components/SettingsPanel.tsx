@@ -865,6 +865,7 @@ function AtivacaoTab({ settings }: { settings: Settings }): JSX.Element {
   const [mode, setMode] = useState<ActivationMode>(settings.activation.mode);
   const [wakeWord, setWakeWord] = useState<WakeWord>(settings.activation.wakeWord);
   const [hotkey, setHotkey] = useState(settings.activation.globalHotkey);
+  const [minAudioMs, setMinAudioMs] = useState(settings.activation.minAudioMs ?? 300);
 
   const persist = useCallback(
     (patch: Partial<Settings['activation']>) => {
@@ -924,6 +925,31 @@ function AtivacaoTab({ settings }: { settings: Settings }): JSX.Element {
         <p className="text-xs text-zinc-500">
           Formato Electron, ex: <code className="select-all rounded bg-black/40 px-1">CommandOrControl+Shift+H</code>.
           Aplica-se ao guardar (perde foco).
+        </p>
+      </Section>
+
+      <Section title="Duração mínima da captura">
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={50}
+            max={1500}
+            step={50}
+            value={minAudioMs}
+            onChange={(e) => setMinAudioMs(Number(e.target.value))}
+            onMouseUp={() => persist({ minAudioMs })}
+            onTouchEnd={() => persist({ minAudioMs })}
+            aria-label="Duração mínima da captura em milissegundos"
+            className="flex-1 accent-accent"
+          />
+          <span className="w-20 text-right font-mono text-xs text-white">
+            {minAudioMs} ms
+          </span>
+        </div>
+        <p className="text-xs text-zinc-500">
+          Cliques mais curtos que isto são ignorados em vez de irem ao
+          reconhecimento de voz — evita o erro &ldquo;audio too short&rdquo; quando
+          tocas no botão sem querer. Padrão: 300&nbsp;ms.
         </p>
       </Section>
     </div>

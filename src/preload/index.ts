@@ -42,6 +42,7 @@ const api = {
     onTtsChunk: (cb: (m: { seq: number; format: string; turnId: string; data: string }) => void): (() => void) =>
       on(IPC.CONV_TTS_CHUNK, cb),
     onError: (cb: (m: { code: string; message: string }) => void): (() => void) => on(IPC.CONV_ERROR, cb),
+    onWarning: (cb: (m: { code: string; message: string }) => void): (() => void) => on(IPC.CONV_WARNING, cb),
     onConnection: (cb: (m: { status: string; latencyMs: number | null; lastError: string | null }) => void): (() => void) =>
       on(IPC.CONNECTION_STATUS, cb),
     onHotkey: (cb: (phase: 'press' | 'release') => void): (() => void) => on(IPC.HOTKEY_TRIGGER, cb),

@@ -20,6 +20,7 @@ export function defaultSettings(): Settings {
       globalHotkey: isMac ? DEFAULT_GLOBAL_HOTKEY_MAC : DEFAULT_GLOBAL_HOTKEY_OTHER,
       vadThreshold: VAD_THRESHOLD_DEFAULT,
       vadSilenceMs: VAD_SILENCE_MS,
+      minAudioMs: 300,
     },
     stt: {
       provider: 'whisper_local',

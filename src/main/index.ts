@@ -233,6 +233,7 @@ function bootstrapConversation(): void {
     });
   });
   orchestrator.on('error', (code, message) => send(IPC.CONV_ERROR, { code, message }));
+  orchestrator.on('warning', (code, message) => send(IPC.CONV_WARNING, { code, message }));
 
   client.connect(s.pairing);
 }

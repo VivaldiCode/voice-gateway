@@ -204,14 +204,27 @@ describe('state-machine — errors', () => {
     expect(after.transcript).toBeNull();
   });
 
-  it('events other than RESET in ERROR are ignored', () => {
+  it('PTT_PRESS in ERROR recovers to CAPTURING and clears lastError', () => {
+    const env = makeEnv();
+    const errored = reduce(
+      initialContext(),
+      { type: 'ERROR', code: 'X', message: 'y' },
+      env,
+    );
+    const next = reduce(errored, { type: 'PTT_PRESS' }, env);
+    expect(next.state).toBe('CAPTURING');
+    expect(next.lastError).toBeNull();
+    expect(next.turnId).toBe('turn-1');
+  });
+
+  it('non-PTT events in ERROR are still ignored (other than RESET / SET_MODE)', () => {
     const errored = reduce(
       initialContext(),
       { type: 'ERROR', code: 'X', message: 'y' },
       makeEnv(),
     );
-    const next = reduce(errored, { type: 'PTT_PRESS' }, makeEnv());
-    expect(next.state).toBe('ERROR');
+    expect(reduce(errored, { type: 'VAD_SILENCE' }, makeEnv())).toBe(errored);
+    expect(reduce(errored, { type: 'RESPONSE_END' }, makeEnv())).toBe(errored);
   });
 });
 

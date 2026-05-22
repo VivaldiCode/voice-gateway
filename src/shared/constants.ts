@@ -67,6 +67,7 @@ export const IPC = {
   CONV_RESPONSE_TEXT: 'vg:conv:response-text',
   CONV_TTS_CHUNK: 'vg:conv:tts-chunk',
   CONV_ERROR: 'vg:conv:error',
+  CONV_WARNING: 'vg:conv:warning',
   CONV_PTT_PRESS: 'vg:conv:ptt:press',
   CONV_PTT_RELEASE: 'vg:conv:ptt:release',
   CONV_AUDIO_FRAME: 'vg:conv:audio-frame',

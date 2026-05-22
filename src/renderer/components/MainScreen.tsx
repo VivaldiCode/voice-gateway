@@ -65,12 +65,16 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           state={conv.state}
           onPress={conv.pressTalk}
           onRelease={conv.releaseTalk}
+          /* Stay clickable when state === 'ERROR' so the new FSM
+             PTT-from-ERROR transition can recover automatically. */
           disabled={
-            conv.connection.status !== 'connected' || conv.sttStatus.state !== 'ready'
+            conv.connection.status !== 'connected' ||
+            (conv.sttStatus.state !== 'ready' && conv.state !== 'ERROR')
           }
         />
         <TranscriptView lines={conv.transcript.slice(-10)} />
         <SttStatusBanner status={conv.sttStatus} />
+        {conv.warning && <CommandHint message={conv.warning} variant="warning" />}
         {conv.error && <CommandHint message={conv.error} variant="error" />}
       </main>
     </div>

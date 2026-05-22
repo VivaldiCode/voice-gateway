@@ -23,7 +23,10 @@ export interface ConversationApi {
   state: State;
   transcript: TranscriptLine[];
   connection: ConnectionDisplay;
+  /** Sticky error — only cleared on RESET / next PTT_PRESS. */
   error: string | null;
+  /** Transient warning (auto-clears after 4s). */
+  warning: string | null;
   sttStatus: SttStatus;
   /** Mic input level in 0..1 (RMS). Only updated while capturing. */
   level: number;
@@ -44,6 +47,7 @@ export function useConversation(): ConversationApi {
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [connection, setConnection] = useState<ConnectionDisplay>(INITIAL_CONNECTION);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [sttStatus, setSttStatus] = useState<SttStatus>({ state: 'idle' });
   const [level, setLevel] = useState(0);
   const [inputDeviceId, setInputDeviceId] = useState<string | null>(null);
@@ -67,7 +71,9 @@ export function useConversation(): ConversationApi {
   useEffect(() => {
     const offState = window.vg.conversation.onState((s) => {
       setState(s.state as State);
-      if (s.state === 'IDLE' || s.state === 'LISTENING_WAKE') setError(null);
+      // Clear sticky error as soon as the FSM leaves ERROR (e.g. via the new
+      // PTT-from-ERROR transition that recovers the user automatically).
+      if (s.state !== 'ERROR') setError(null);
     });
     const offTranscript = window.vg.conversation.onTranscript((m) => {
       if (!m.text) return;
@@ -89,6 +95,10 @@ export function useConversation(): ConversationApi {
       playback.pushChunk(bytes, m.format as PlaybackFormat);
     });
     const offError = window.vg.conversation.onError((m) => setError(m.message));
+    const offWarning = window.vg.conversation.onWarning((m) => {
+      setWarning(m.message);
+      window.setTimeout(() => setWarning((cur) => (cur === m.message ? null : cur)), 4_000);
+    });
     const offConn = window.vg.conversation.onConnection((m) => {
       setConnection({
         status: m.status as ConnectionDisplay['status'],
@@ -107,6 +117,7 @@ export function useConversation(): ConversationApi {
       offResponse();
       offTts();
       offError();
+      offWarning();
       offConn();
       offHotkey();
       offStt();
@@ -167,6 +178,7 @@ export function useConversation(): ConversationApi {
     transcript,
     connection,
     error,
+    warning,
     sttStatus,
     level,
     pressTalk: () => window.vg.conversation.pttPress(),

@@ -81,6 +81,9 @@ function makeOrchestrator(): {
   const stt = new FakeStt();
   const tts = new FakeTts();
   const settings = defaultSettings();
+  // Tests push tiny byte buffers; disable the production min-audio guard so
+  // the orchestrator still exercises the STT → WS → TTS path.
+  settings.activation.minAudioMs = 0;
   const o = new ConversationOrchestrator(
     client as unknown as HermesClient,
     stt,

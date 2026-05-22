@@ -174,8 +174,21 @@ export function reduce(
       return ctx;
     }
 
-    case 'ERROR':
+    case 'ERROR': {
+      // PTT acts as an implicit RESET + start: pressing the mic button after
+      // any error should always get the user out of the dead-end and into a
+      // new capture. Otherwise the orb stays red and clicks are no-ops.
+      if (event.type === 'PTT_PRESS') {
+        return {
+          ...ctx,
+          state: 'CAPTURING',
+          turnId: env.newTurnId(),
+          transcript: null,
+          lastError: null,
+        };
+      }
       return ctx;
+    }
   }
 }
 

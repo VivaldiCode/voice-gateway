@@ -21,6 +21,8 @@ export interface OrchestratorEvents {
   response_text: (text: string, final: boolean, turnId: string) => void;
   tts_chunk: (chunk: TtsChunk, turnId: string) => void;
   error: (code: string, message: string) => void;
+  /** Non-fatal hint (UI shows briefly, FSM stays usable). */
+  warning: (code: string, message: string) => void;
 }
 
 /**
@@ -35,6 +37,7 @@ export class ConversationOrchestrator extends EventEmitter {
   private readonly env: ReducerEnv;
   private currentTurnAudio: Buffer[] = [];
   private currentLang: string | 'auto' = 'auto';
+  private minAudioMs = 300;
   private pendingTtsTurnId: string | null = null;
   private readonly onTtsChunk = (c: TtsChunk): void => {
     if (!this.pendingTtsTurnId) return;
@@ -61,6 +64,7 @@ export class ConversationOrchestrator extends EventEmitter {
     this.env = env;
     this.ctx = initialContext(settings.activation.mode);
     this.currentLang = settings.stt.language;
+    this.minAudioMs = Math.max(0, settings.activation.minAudioMs ?? 300);
     this.bindTts();
     this.bindClient();
   }
@@ -151,6 +155,29 @@ export class ConversationOrchestrator extends EventEmitter {
     const audio = Buffer.concat(this.currentTurnAudio);
     this.currentTurnAudio = [];
     if (!turnId) return;
+
+    // PCM16 mono @ 16kHz: 2 bytes/sample × 16 samples/ms = 32 bytes/ms.
+    const audioMs = audio.length / 32;
+    if (audioMs < this.minAudioMs) {
+      log.info(
+        '[VG] capture too short:',
+        Math.round(audioMs),
+        'ms <',
+        this.minAudioMs,
+        'ms — skipping STT',
+      );
+      this.emit(
+        'warning',
+        ERROR_CODES.STT_FAILED,
+        audioMs < 50
+          ? 'Captura muito curta. Mantém o botão premido enquanto falas.'
+          : `Captura de ${Math.round(audioMs)} ms é demasiado curta. Mantém o botão premido pelo menos ${this.minAudioMs} ms.`,
+      );
+      // Short-circuit back to IDLE without involving STT or Hermes.
+      this.dispatch({ type: 'TRANSCRIPT_FINAL', text: '' });
+      this.dispatch({ type: 'RESPONSE_END' });
+      return;
+    }
 
     let transcript = '';
     try {
