@@ -303,12 +303,24 @@ cp -R "$SRC_PKG/." "$INSTALL_DIR/"
 
 # ---------- python venv ----------
 VENV="$INSTALL_DIR/venv"
-if [[ ! -d "$VENV" ]]; then
-  python3 -m venv "$VENV"
+if [[ ! -d "$VENV/bin" ]]; then
+  # Always remove a stale, partial venv from a previous failed install
+  # before re-creating, otherwise python3 -m venv is a no-op.
+  rm -rf "$VENV"
+  python3 -m venv "$VENV" || fail "python3 -m venv failed — is python venv truly installed?"
   ok "created virtualenv"
 fi
-"$VENV/bin/pip" install --upgrade pip wheel >/dev/null
-"$VENV/bin/pip" install --upgrade "$INSTALL_DIR" >/dev/null
+if [[ ! -x "$VENV/bin/pip" ]]; then
+  fail "venv was created but ${VENV}/bin/pip is missing. Re-install python3-venv and retry."
+fi
+# Use HOME=/tmp so pip doesn't try to write to the invoking user's ~/.cache
+# (sudo without -H preserves $HOME → noisy permission warning + disabled cache).
+PIP_HOME=/tmp
+PIP_OPTS=(--quiet --disable-pip-version-check --no-cache-dir)
+HOME="$PIP_HOME" "$VENV/bin/pip" install "${PIP_OPTS[@]}" --upgrade pip wheel \
+  || fail "pip self-upgrade failed"
+HOME="$PIP_HOME" "$VENV/bin/pip" install "${PIP_OPTS[@]}" --upgrade "$INSTALL_DIR" \
+  || fail "pip install of hermes-voice-bridge failed"
 ok "installed hermes-voice-bridge"
 
 # ---------- config ----------
@@ -335,8 +347,14 @@ token = "${EXISTING_TOKEN}"
 base_url = "${HERMES_URL}"
 request_timeout = 30
 EOF
-chmod 600 "$CONFIG_FILE"
+# 0640: owner (root) can rw, group (hermes-voice) can read. The service runs
+# as hermes-voice, so it needs group read access to the token file.
+chmod 0640 "$CONFIG_FILE"
 chown root:"$SERVICE_USER" "$CONFIG_FILE"
+# Make sure /etc/hermes-voice-bridge itself is traversable by the service
+# user. ProtectSystem=strict + group-read 0750 is enough.
+chmod 0750 "$CONFIG_DIR"
+chown root:"$SERVICE_USER" "$CONFIG_DIR"
 
 # ---------- systemd ----------
 UNIT_SRC="$INSTALL_DIR/systemd/hermes-voice-bridge.service"
