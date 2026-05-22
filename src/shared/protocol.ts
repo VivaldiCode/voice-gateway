@@ -4,7 +4,8 @@
  * Text frames are JSON. Audio chunks are binary frames preceded by a text
  * header (`audio_chunk` or `response_audio_chunk`) identifying turn + seq.
  *
- * See docs/PROTOCOL.md for the full specification.
+ * See docs/Protocol.md (rendered at github.com/VivaldiCode/voice-gateway/wiki/Protocol)
+ * for the full specification.
  */
 
 export type ClientCapability =

@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# Canonical raw URL for piped installs (`curl ... | bash`). Used to re-fetch
+# this script under sudo when we cannot exec ourselves directly.
+INSTALL_SCRIPT_URL="${INSTALL_SCRIPT_URL:-https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh}"
+
 # ---------- pretty printing ----------
 BOLD=$'\e[1m'
 DIM=$'\e[2m'
@@ -44,7 +48,20 @@ if [[ $EUID -ne 0 ]]; then
   if ! command -v sudo >/dev/null 2>&1; then
     fail "Root privileges required (no sudo found)."
   fi
-  exec sudo -E bash "$0" "$@"
+  # When invoked via `curl ... | bash`, $0 is literally "bash" (or the path
+  # of the shell), not a script file. `exec sudo -E bash "$0"` would then
+  # try to execute the bash binary as a script and fail with
+  # "cannot execute binary file". Detect that case and re-fetch ourselves
+  # over the wire instead of trying to re-exec a missing file.
+  if [[ -f "$0" ]] && [[ -r "$0" ]] && [[ "$(basename "$0")" != "bash" ]]; then
+    exec sudo -E bash "$0" "$@"
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    fail "Detected a piped install but curl is missing — install curl and retry, or download the script first."
+  fi
+  warn "re-fetching installer under sudo (piped install detected)"
+  exec sudo -E env "INSTALL_SCRIPT_URL=${INSTALL_SCRIPT_URL}" bash -c \
+    "bash <(curl -fsSL \"\$INSTALL_SCRIPT_URL\") $(printf '%q ' "$@")"
 fi
 
 if ! command -v systemctl >/dev/null 2>&1; then

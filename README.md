@@ -47,10 +47,12 @@ Then say "hello".
 
 ## Documentation
 
-- [SETUP](docs/SETUP.md) — end-to-end walkthrough with screenshots.
-- [PROTOCOL](docs/PROTOCOL.md) — the WebSocket message types.
-- [ARCHITECTURE](docs/ARCHITECTURE.md) — why the code is shaped this way.
-- [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) — when something doesn't work.
+The full docs live in the [**Voice Gateway wiki**](https://github.com/VivaldiCode/voice-gateway/wiki). The source markdown is in [`docs/`](docs/) — see [docs/README.md](docs/README.md) for the publishing flow.
+
+- [Setup](https://github.com/VivaldiCode/voice-gateway/wiki/Setup) — end-to-end walkthrough.
+- [Protocol](https://github.com/VivaldiCode/voice-gateway/wiki/Protocol) — the WebSocket message types.
+- [Architecture](https://github.com/VivaldiCode/voice-gateway/wiki/Architecture) — why the code is shaped this way.
+- [Troubleshooting](https://github.com/VivaldiCode/voice-gateway/wiki/Troubleshooting) — when something doesn't work.
 
 ## Local-first vs cloud
 

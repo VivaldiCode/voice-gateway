@@ -4,7 +4,7 @@ WebSocket bridge between the Voice Gateway desktop app and your Hermes agent.
 
 ## What it does
 
-Speaks the [Voice Gateway WebSocket protocol](../../docs/PROTOCOL.md) and
+Speaks the [Voice Gateway WebSocket protocol](https://github.com/VivaldiCode/voice-gateway/wiki/Protocol) and
 translates each turn into an HTTP call against the local Hermes API. By
 default it assumes Hermes exposes:
 

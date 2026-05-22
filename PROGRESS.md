@@ -52,7 +52,9 @@ Sessão iniciada em 2026-05-22.
 - systemd unit hardened + `install.sh` idempotente + `uninstall.sh`.
 
 ### Phase 9 — Docs ✅
-- `README.md`, `docs/SETUP.md`, `docs/PROTOCOL.md`, `docs/ARCHITECTURE.md`, `docs/TROUBLESHOOTING.md` com conteúdo real.
+- `README.md` + `docs/{Home,Setup,Protocol,Architecture,Troubleshooting}.md`
+  estruturados como GitHub Wiki (com `_Sidebar.md`, `_Footer.md`, e
+  `docs/sync-wiki.sh` para publicar para `voice-gateway.wiki.git`).
 
 ### Phase 10 — Quality gates ✅
 - `npm run typecheck` — verde.
