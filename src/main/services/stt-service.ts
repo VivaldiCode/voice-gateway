@@ -1,6 +1,7 @@
 import { promises as fs, createWriteStream } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { app } from 'electron';
 import log from 'electron-log/main';
 import type { LanguageCode } from '@shared/constants';
@@ -29,7 +30,7 @@ export interface SttAdapter {
 }
 
 export interface ProgressEvent {
-  stage: 'downloading' | 'extracting' | 'verifying' | 'ready';
+  stage: 'downloading' | 'extracting' | 'verifying' | 'installing' | 'ready';
   /** 0..1, or null if unknown. */
   fraction: number | null;
   detail?: string;
@@ -103,14 +104,23 @@ export class OpenAIWhisperAdapter implements SttAdapter {
 // ───────── whisper.cpp local adapter ─────────
 
 export interface WhisperLocalOptions {
-  /** Directory holding the whisper.cpp `main` binary + model files. */
+  /** Directory holding model files (ggml-*.bin). */
   modelsDir?: string;
+  /** Preferred path to the whisper binary. If missing, falls back to PATH discovery. */
   binaryPath?: string;
   config: WhisperLocalConfig;
   /** Override the spawner — useful for tests. */
   spawnImpl?: typeof spawn;
   /** Override the downloader — useful for tests. */
   downloadFile?: (url: string, dest: string, onProgress?: (p: ProgressEvent) => void) => Promise<void>;
+  /** Override the PATH-lookup helper — useful for tests. */
+  whichImpl?: (cmd: string) => Promise<string | null>;
+  /**
+   * If true and binary is not found, try installing it via the platform
+   * package manager (Homebrew on macOS). Off by default to keep behaviour
+   * predictable; opt-in via boot config.
+   */
+  autoInstall?: boolean;
 }
 
 const WHISPER_MODEL_URLS: Record<string, string> = {
@@ -119,30 +129,66 @@ const WHISPER_MODEL_URLS: Record<string, string> = {
   small: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
 };
 
+/** Binary names we accept, in order of preference. `whisper-cli` is the
+ *  modern Homebrew name; `whisper-cpp` is the legacy alias; `whisper` is the
+ *  classic name when users build from source. */
+const WHISPER_BINARY_CANDIDATES = ['whisper-cli', 'whisper-cpp', 'whisper'];
+
 export class WhisperLocalAdapter implements SttAdapter {
   readonly id = 'whisper_local';
   private readonly modelsDir: string;
-  private readonly binaryPath: string;
+  private readonly preferredBinary: string;
   private readonly config: WhisperLocalConfig;
   private readonly spawnImpl: typeof spawn;
   private readonly downloadFile: NonNullable<WhisperLocalOptions['downloadFile']>;
+  private readonly whichImpl: NonNullable<WhisperLocalOptions['whichImpl']>;
+  private readonly autoInstall: boolean;
+  private resolvedBinary: string | null = null;
 
   constructor(opts: WhisperLocalOptions) {
-    this.modelsDir =
-      opts.modelsDir ?? join(safeUserDataPath(), 'whisper', 'models');
-    this.binaryPath = opts.binaryPath ?? join(safeUserDataPath(), 'whisper', 'bin', binaryName());
+    this.modelsDir = opts.modelsDir ?? join(safeUserDataPath(), 'whisper', 'models');
+    this.preferredBinary =
+      opts.binaryPath ?? join(safeUserDataPath(), 'whisper', 'bin', binaryName());
     this.config = opts.config;
     this.spawnImpl = opts.spawnImpl ?? spawn;
     this.downloadFile = opts.downloadFile ?? defaultDownloadFile;
+    this.whichImpl = opts.whichImpl ?? defaultWhich;
+    this.autoInstall = opts.autoInstall ?? false;
   }
 
   private modelPath(): string {
     return join(this.modelsDir, `ggml-${this.config.model}.bin`);
   }
 
-  async isReady(): Promise<boolean> {
+  /**
+   * Locate a usable whisper binary. Order:
+   *   1. The explicitly-preferred path (typically userData/whisper/bin/whisper)
+   *   2. `whisper-cli` / `whisper-cpp` / `whisper` on PATH
+   * Returns the absolute path on success or null on failure.
+   */
+  private async discoverBinary(): Promise<string | null> {
+    if (this.resolvedBinary) return this.resolvedBinary;
     try {
-      await fs.access(this.binaryPath);
+      await fs.access(this.preferredBinary);
+      this.resolvedBinary = this.preferredBinary;
+      return this.resolvedBinary;
+    } catch {
+      // fall through to PATH lookup
+    }
+    for (const name of WHISPER_BINARY_CANDIDATES) {
+      const found = await this.whichImpl(name);
+      if (found) {
+        this.resolvedBinary = found;
+        return this.resolvedBinary;
+      }
+    }
+    return null;
+  }
+
+  async isReady(): Promise<boolean> {
+    const bin = await this.discoverBinary();
+    if (!bin) return false;
+    try {
       await fs.access(this.modelPath());
       return true;
     } catch {
@@ -152,13 +198,25 @@ export class WhisperLocalAdapter implements SttAdapter {
 
   async prepare(onProgress?: (p: ProgressEvent) => void): Promise<void> {
     await fs.mkdir(this.modelsDir, { recursive: true });
-    await fs.mkdir(dirname(this.binaryPath), { recursive: true });
 
-    try {
-      await fs.access(this.binaryPath);
-    } catch {
+    let bin = await this.discoverBinary();
+    if (!bin && this.autoInstall && process.platform === 'darwin') {
+      const brew = await this.whichImpl('brew');
+      if (brew) {
+        onProgress?.({
+          stage: 'installing',
+          fraction: null,
+          detail: 'brew install whisper-cpp',
+        });
+        await this.runProcess(brew, ['install', 'whisper-cpp']);
+        bin = await this.discoverBinary();
+      }
+    }
+    if (!bin) {
       throw new Error(
-        'Whisper local ainda não está instalado. Corre o instalador ou usa a OpenAI Whisper API.',
+        process.platform === 'darwin'
+          ? 'Whisper local não está instalado. No terminal: `brew install whisper-cpp`. (Ou abre Definições e escolhe a OpenAI Whisper API.)'
+          : 'Whisper local não está instalado. Instala `whisper.cpp` ou abre Definições e escolhe a OpenAI Whisper API.',
       );
     }
 
@@ -167,7 +225,11 @@ export class WhisperLocalAdapter implements SttAdapter {
     } catch {
       const url = WHISPER_MODEL_URLS[this.config.model];
       if (!url) throw new Error(`Modelo Whisper desconhecido: ${this.config.model}`);
-      onProgress?.({ stage: 'downloading', fraction: 0, detail: `ggml-${this.config.model}.bin` });
+      onProgress?.({
+        stage: 'downloading',
+        fraction: 0,
+        detail: `ggml-${this.config.model}.bin`,
+      });
       await this.downloadFile(url, this.modelPath(), onProgress);
     }
     onProgress?.({ stage: 'ready', fraction: 1 });
@@ -177,51 +239,78 @@ export class WhisperLocalAdapter implements SttAdapter {
     if (!(await this.isReady())) {
       throw new Error('Whisper local não está pronto. Chama prepare() primeiro.');
     }
-    // whisper.cpp accepts WAV via stdin (`-f -`) and outputs text on stdout.
-    const wav = pcm16ToWav(req.pcm, 16_000);
-    const args = [
-      '-m', this.modelPath(),
-      '-nt',
-      '-otxt', 'false',
-      '-f', '-',
-    ];
-    if (req.language !== 'auto') args.push('-l', req.language);
+    const bin = this.resolvedBinary;
+    if (!bin) throw new Error('Whisper local: binário não resolvido.');
 
-    const startedAt = Date.now();
-    const text = await new Promise<string>((resolve, reject) => {
-      const proc = this.spawnImpl(this.binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    // whisper-cli reads from a file (no stdin support). Write the WAV to a
+    // per-turn temp file and clean up afterwards.
+    const workDir = await fs.mkdtemp(join(tmpdir(), 'vg-whisper-'));
+    const wavPath = join(workDir, 'turn.wav');
+    try {
+      await fs.writeFile(wavPath, pcm16ToWav(req.pcm, 16_000));
+      const args = [
+        '-m', this.modelPath(),
+        '-l', req.language === 'auto' ? 'auto' : req.language,
+        '-nt', // no timestamps
+        '-np', // suppress whisper.cpp's own log lines on stderr
+        '-f', wavPath,
+      ];
+      const startedAt = Date.now();
+      const text = await this.runProcess(bin, args);
+      return { text: text.trim(), durationMs: Date.now() - startedAt };
+    } finally {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /** Spawn a process, capture stdout, reject on non-zero exit. */
+  private runProcess(bin: string, args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let proc: ChildProcess;
+      try {
+        proc = this.spawnImpl(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
       const out: Buffer[] = [];
       const err: Buffer[] = [];
       proc.stdout?.on('data', (b: Buffer) => out.push(b));
       proc.stderr?.on('data', (b: Buffer) => err.push(b));
       proc.on('error', reject);
       proc.on('close', (code) => {
-        if (code !== 0) {
-          reject(
-            new Error(
-              `whisper.cpp falhou (código ${code}): ${Buffer.concat(err).toString().slice(0, 200)}`,
-            ),
-          );
+        if (code === 0) {
+          resolve(Buffer.concat(out).toString('utf-8'));
           return;
         }
-        resolve(Buffer.concat(out).toString('utf-8').trim());
+        const tail = Buffer.concat(err).toString('utf-8').trim().slice(-300);
+        reject(new Error(`whisper.cpp falhou (código ${code}): ${tail || '(sem stderr)'}`));
       });
-      proc.stdin?.end(wav);
     });
-    return { text, durationMs: Date.now() - startedAt };
   }
 }
 
 // ───────── Factory ─────────
 
-export function createSttAdapter(settings: SttSettings): SttAdapter {
+export interface CreateSttOptions {
+  /** If true, auto-install missing local STT dependencies (e.g. brew). */
+  autoInstall?: boolean;
+}
+
+export function createSttAdapter(
+  settings: SttSettings,
+  opts: CreateSttOptions = {},
+): SttAdapter {
   if (settings.provider === 'openai_whisper') {
     return new OpenAIWhisperAdapter({
       apiKey: settings.openai.apiKey,
       model: settings.openai.model,
     });
   }
-  return new WhisperLocalAdapter({ config: settings.whisperLocal });
+  return new WhisperLocalAdapter({
+    config: settings.whisperLocal,
+    autoInstall: opts.autoInstall ?? false,
+  });
 }
 
 // ───────── Helpers ─────────
@@ -272,6 +361,32 @@ export function pcm16ToWav(pcm: Buffer | Uint8Array, sampleRate: number): Buffer
   buf.writeUInt32LE(data.length, 40);
   data.copy(buf, 44);
   return buf;
+}
+
+/** Default which() — spawns `/usr/bin/which` (or `where` on Windows) and returns
+ *  the resolved binary path on success. */
+function defaultWhich(cmd: string): Promise<string | null> {
+  const tool = process.platform === 'win32' ? 'where' : 'which';
+  return new Promise((resolve) => {
+    let proc: ChildProcess;
+    try {
+      proc = spawn(tool, [cmd], { stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    proc.stdout?.on('data', (b: Buffer) => chunks.push(b));
+    proc.on('error', () => resolve(null));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      const first = Buffer.concat(chunks).toString('utf-8').split(/\r?\n/)[0]?.trim();
+      resolve(first && first.length > 0 ? first : null);
+    });
+  });
 }
 
 async function defaultDownloadFile(

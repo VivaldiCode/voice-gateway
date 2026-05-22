@@ -73,6 +73,9 @@ describe('OpenAIWhisperAdapter', () => {
 
 describe('WhisperLocalAdapter', () => {
   let tmpDir: string;
+  /** Always return null from PATH lookup so tests stay deterministic on dev
+   *  machines that happen to have whisper-cli installed via brew. */
+  const noPathLookup = async (): Promise<string | null> => null;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'vg-whisper-'));
@@ -87,6 +90,7 @@ describe('WhisperLocalAdapter', () => {
       modelsDir: join(tmpDir, 'models'),
       binaryPath: join(tmpDir, 'bin', 'whisper'),
       config: { model: 'base' },
+      whichImpl: noPathLookup,
     });
     expect(await a.isReady()).toBe(false);
   });
@@ -96,8 +100,21 @@ describe('WhisperLocalAdapter', () => {
       modelsDir: join(tmpDir, 'models'),
       binaryPath: join(tmpDir, 'bin', 'whisper'),
       config: { model: 'base' },
+      whichImpl: noPathLookup,
     });
-    await expect(a.prepare()).rejects.toThrow(/ainda não está instalado/i);
+    await expect(a.prepare()).rejects.toThrow(/não está instalado/i);
+  });
+
+  it('isReady becomes true once a binary is discovered on PATH', async () => {
+    await fs.mkdir(join(tmpDir, 'models'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'models', 'ggml-base.bin'), '');
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'no-such-bin'),
+      config: { model: 'base' },
+      whichImpl: async (cmd) => (cmd === 'whisper-cli' ? '/opt/homebrew/bin/whisper-cli' : null),
+    });
+    expect(await a.isReady()).toBe(true);
   });
 
   it('prepare downloads the model if binary exists but model does not', async () => {
@@ -108,6 +125,7 @@ describe('WhisperLocalAdapter', () => {
       modelsDir: join(tmpDir, 'models'),
       binaryPath: join(tmpDir, 'bin', 'whisper'),
       config: { model: 'tiny' },
+      whichImpl: noPathLookup,
       downloadFile: async (url, dest) => {
         downloads.push(url);
         await fs.mkdir(join(dest, '..'), { recursive: true });
@@ -118,6 +136,48 @@ describe('WhisperLocalAdapter', () => {
     expect(downloads).toHaveLength(1);
     expect(downloads[0]).toMatch(/ggml-tiny\.bin$/);
     expect(await a.isReady()).toBe(true);
+  });
+
+  it('prepare auto-installs via brew on macOS when autoInstall=true', async () => {
+    if (process.platform !== 'darwin') return; // brew path only relevant on darwin
+    await fs.mkdir(join(tmpDir, 'models'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'models', 'ggml-base.bin'), '');
+    const ranCommands: string[][] = [];
+    let installed = false;
+    const fakeSpawn = ((path: string, args: string[]) => {
+      ranCommands.push([path, ...args]);
+      const ee = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+      };
+      ee.stdout = new EventEmitter();
+      ee.stderr = new EventEmitter();
+      setImmediate(() => {
+        installed = path.endsWith('/brew') || installed;
+        ee.emit('close', 0);
+      });
+      return ee;
+    }) as unknown as ConstructorParameters<typeof WhisperLocalAdapter>[0]['spawnImpl'];
+
+    let lookupCallCount = 0;
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'no-such-bin'),
+      config: { model: 'base' },
+      autoInstall: true,
+      spawnImpl: fakeSpawn,
+      whichImpl: async (cmd) => {
+        lookupCallCount += 1;
+        if (cmd === 'brew') return '/opt/homebrew/bin/brew';
+        // Pretend whisper-cli appears after brew install ran.
+        if (cmd === 'whisper-cli' && installed) return '/opt/homebrew/bin/whisper-cli';
+        return null;
+      },
+    });
+    await a.prepare();
+    expect(ranCommands[0]?.[0]).toBe('/opt/homebrew/bin/brew');
+    expect(ranCommands[0]?.slice(1)).toEqual(['install', 'whisper-cpp']);
+    expect(lookupCallCount).toBeGreaterThan(0);
   });
 
   it('transcribe spawns the binary with the right args and reads stdout', async () => {
@@ -152,12 +212,18 @@ describe('WhisperLocalAdapter', () => {
       binaryPath: join(tmpDir, 'bin', 'whisper'),
       config: { model: 'base' },
       spawnImpl: fakeSpawn,
+      whichImpl: noPathLookup,
     });
     const r = await a.transcribe({ pcm: Buffer.alloc(0), language: 'pt' });
     expect(r.text).toBe('olá hermes');
     expect(seenArgs[0]).toContain('-m');
     expect(seenArgs[0]).toContain('-l');
     expect(seenArgs[0]).toContain('pt');
+    expect(seenArgs[0]).toContain('-f');
+    // -f must be followed by a real WAV path (no longer `-` for stdin).
+    const fIdx = seenArgs[0]!.indexOf('-f');
+    expect(seenArgs[0]![fIdx + 1]).not.toBe('-');
+    expect(seenArgs[0]![fIdx + 1]).toMatch(/\.wav$/);
   });
 });
 

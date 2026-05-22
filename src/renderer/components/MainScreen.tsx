@@ -6,6 +6,7 @@ import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
 import { useConversation } from '../hooks/useConversation';
 import { cn } from '../lib/cn';
+import type { SttStatus } from '../global';
 
 export interface MainScreenProps {
   bridgeUrl: string | null;
@@ -58,9 +59,12 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           state={conv.state}
           onPress={conv.pressTalk}
           onRelease={conv.releaseTalk}
-          disabled={conv.connection.status !== 'connected'}
+          disabled={
+            conv.connection.status !== 'connected' || conv.sttStatus.state !== 'ready'
+          }
         />
         <TranscriptView lines={conv.transcript.slice(-10)} />
+        <SttStatusBanner status={conv.sttStatus} />
         {conv.error && (
           <p
             role="alert"
@@ -70,6 +74,50 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           </p>
         )}
       </main>
+    </div>
+  );
+}
+
+function SttStatusBanner({ status }: { status: SttStatus }): JSX.Element | null {
+  if (status.state === 'ready' || status.state === 'idle') return null;
+
+  if (status.state === 'preparing') {
+    const p = status.progress;
+    const pct = p?.fraction != null ? Math.round(p.fraction * 100) : null;
+    const label =
+      p?.stage === 'installing'
+        ? p.detail ?? 'a instalar dependências'
+        : p?.stage === 'downloading'
+          ? `a descarregar modelo de voz ${p.detail ?? ''}`
+          : 'a preparar reconhecimento de voz';
+    return (
+      <div
+        role="status"
+        className="flex max-w-md flex-col gap-2 rounded-xl border border-bg-subtle bg-bg-panel/60 px-4 py-3 text-xs text-zinc-300"
+        data-testid="stt-status"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span>{label}…</span>
+          {pct != null && <span className="font-mono text-accent">{pct}%</span>}
+        </div>
+        <div className="h-1 overflow-hidden rounded-full bg-bg-subtle">
+          <div
+            className="h-full rounded-full bg-accent transition-all"
+            style={{ width: pct != null ? `${pct}%` : '40%' }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // error
+  return (
+    <div
+      role="alert"
+      className="max-w-md rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-xs text-red-200"
+      data-testid="stt-error"
+    >
+      {status.message}
     </div>
   );
 }

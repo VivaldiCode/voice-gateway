@@ -15,6 +15,18 @@ interface ConversationStateMsg {
   lastError: { code: string; message: string } | null;
 }
 
+export type SttProgress = {
+  stage: 'downloading' | 'extracting' | 'verifying' | 'installing' | 'ready';
+  fraction: number | null;
+  detail?: string;
+};
+
+export type SttStatus =
+  | { state: 'idle' }
+  | { state: 'preparing'; progress?: SttProgress }
+  | { state: 'ready' }
+  | { state: 'error'; message: string };
+
 interface VgApi {
   ping: () => Promise<'pong'>;
   settings: {
@@ -41,6 +53,9 @@ interface VgApi {
     cancel: () => void;
     bargeIn: () => void;
     reset: () => void;
+  };
+  stt: {
+    onStatus: (cb: (s: SttStatus) => void) => () => void;
   };
 }
 

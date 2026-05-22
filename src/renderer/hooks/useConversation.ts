@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AudioCapture } from '../lib/audio-capture';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 import type { TranscriptLine } from '../components/TranscriptView';
+import type { SttStatus } from '../global';
 
 type State =
   | 'IDLE'
@@ -23,6 +24,7 @@ export interface ConversationApi {
   transcript: TranscriptLine[];
   connection: ConnectionDisplay;
   error: string | null;
+  sttStatus: SttStatus;
   pressTalk: () => void;
   releaseTalk: () => void;
   cancel: () => void;
@@ -40,6 +42,7 @@ export function useConversation(): ConversationApi {
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [connection, setConnection] = useState<ConnectionDisplay>(INITIAL_CONNECTION);
   const [error, setError] = useState<string | null>(null);
+  const [sttStatus, setSttStatus] = useState<SttStatus>({ state: 'idle' });
 
   const capture = useMemo(() => new AudioCapture(), []);
   const playback = useMemo(() => new AudioPlayback(), []);
@@ -79,6 +82,7 @@ export function useConversation(): ConversationApi {
     const offHotkey = window.vg.conversation.onHotkey(() => {
       // The main process drives the FSM transitions; we just react to state.
     });
+    const offStt = window.vg.stt.onStatus(setSttStatus);
 
     return () => {
       offState();
@@ -88,6 +92,7 @@ export function useConversation(): ConversationApi {
       offError();
       offConn();
       offHotkey();
+      offStt();
     };
   }, [playback]);
 
@@ -120,6 +125,7 @@ export function useConversation(): ConversationApi {
     transcript,
     connection,
     error,
+    sttStatus,
     pressTalk: () => window.vg.conversation.pttPress(),
     releaseTalk: () => window.vg.conversation.pttRelease(),
     cancel: () => window.vg.conversation.cancel(),

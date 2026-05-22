@@ -51,6 +51,18 @@ const api = {
     bargeIn: (): void => ipcRenderer.send(IPC.CONV_BARGE_IN),
     reset: (): void => ipcRenderer.send(IPC.CONV_RESET),
   },
+
+  stt: {
+    onStatus: (
+      cb: (
+        s:
+          | { state: 'idle' }
+          | { state: 'preparing'; progress?: { stage: string; fraction: number | null; detail?: string } }
+          | { state: 'ready' }
+          | { state: 'error'; message: string },
+      ) => void,
+    ): (() => void) => on(IPC.STT_STATUS, cb),
+  },
 } as const;
 
 contextBridge.exposeInMainWorld('vg', api);

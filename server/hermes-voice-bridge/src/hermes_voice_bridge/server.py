@@ -65,49 +65,58 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     await ws.prepare(request)
     adapter: HermesAdapter = request.app["adapter"]
     session_id = secrets.token_hex(8)
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.ERROR:
+                log.warning("ws error: %s", ws.exception())
+                break
+            if msg.type != WSMsgType.TEXT:
+                continue
+            try:
+                data = json.loads(msg.data)
+            except json.JSONDecodeError:
+                await send_error(ws, "WS_INVALID_MESSAGE", "invalid JSON")
+                continue
+            if not isinstance(data, dict):
+                await send_error(ws, "WS_INVALID_MESSAGE", "expected JSON object")
+                continue
 
-    async for msg in ws:
-        if msg.type == WSMsgType.ERROR:
-            log.warning("ws error: %s", ws.exception())
-            break
-        if msg.type != WSMsgType.TEXT:
-            continue
-        try:
-            data = json.loads(msg.data)
-        except json.JSONDecodeError:
-            await send_error(ws, "WS_INVALID_MESSAGE", "invalid JSON")
-            continue
-        if not isinstance(data, dict):
-            await send_error(ws, "WS_INVALID_MESSAGE", "expected JSON object")
-            continue
+            t = data.get("type")
+            if t == "hello":
+                await ws.send_json(
+                    {
+                        "type": "welcome",
+                        "session_id": session_id,
+                        "server_version": __version__,
+                        "capabilities": SUPPORTED_CAPS,
+                    }
+                )
+                continue
+            if t == "ping":
+                await ws.send_json({"type": "pong"})
+                continue
+            if t == "transcript":
+                turn_id = str(data.get("turn_id", ""))
+                text = str(data.get("text", ""))
+                final = bool(data.get("final"))
+                if final and text.strip():
+                    asyncio.create_task(
+                        _run_turn(ws, adapter, turn_id, text, session_id)
+                    )
+                continue
+            if t in {"start_turn", "end_turn", "audio_chunk", "interrupt"}:
+                # Acknowledge silently. Audio path not yet wired through.
+                continue
 
-        t = data.get("type")
-        if t == "hello":
-            await ws.send_json(
-                {
-                    "type": "welcome",
-                    "session_id": session_id,
-                    "server_version": __version__,
-                    "capabilities": SUPPORTED_CAPS,
-                }
+            await send_error(
+                ws, "WS_INVALID_MESSAGE", f"unknown type {t!r}", turn_id=data.get("turn_id")
             )
-            continue
-        if t == "ping":
-            await ws.send_json({"type": "pong"})
-            continue
-        if t == "transcript":
-            turn_id = str(data.get("turn_id", ""))
-            text = str(data.get("text", ""))
-            final = bool(data.get("final"))
-            if final and text.strip():
-                asyncio.create_task(_run_turn(ws, adapter, turn_id, text, session_id))
-            continue
-        if t in {"start_turn", "end_turn", "audio_chunk", "interrupt"}:
-            # Acknowledge silently. Audio path not yet wired through.
-            continue
-
-        await send_error(ws, "WS_INVALID_MESSAGE", f"unknown type {t!r}", turn_id=data.get("turn_id"))
-
+    finally:
+        # Drop the cached chat history so a reconnect is clean. (No-op on the
+        # test fake adapter, which doesn't implement forget.)
+        forget = getattr(adapter, "forget", None)
+        if callable(forget):
+            forget(session_id)
     return ws
 
 

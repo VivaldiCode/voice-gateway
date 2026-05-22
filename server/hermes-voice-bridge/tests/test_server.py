@@ -5,7 +5,8 @@ import json
 from typing import AsyncIterator, List
 
 import pytest
-from aiohttp.test_utils import TestClient, TestServer
+from aiohttp import web
+from aiohttp.test_utils import TestClient
 
 from hermes_voice_bridge import __version__
 from hermes_voice_bridge.auth import extract_bearer, is_valid_token
@@ -160,3 +161,64 @@ async def test_ws_unknown_type_yields_error(client: TestClient) -> None:
     msg = await ws.receive_json(timeout=2)
     assert msg["type"] == "error"
     await ws.close()
+
+
+# ---------- HermesAdapter against a fake Hermes (real HTTP) ----------
+
+async def _fake_hermes_chat(request: web.Request) -> web.StreamResponse:
+    """Pretend to be Hermes at /v1/chat/completions, OpenAI-compatible SSE."""
+    payload = await request.json()
+    assert payload["model"] == "hermes-agent"
+    assert payload["stream"] is True
+    # Echo back the last user message as 3 SSE deltas.
+    last = payload["messages"][-1]["content"]
+    resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
+    await resp.prepare(request)
+    for chunk in (f"ouvi-te dizer: ", f"{last}", ". confirmado."):
+        line = json.dumps({"choices": [{"delta": {"content": chunk}}]})
+        await resp.write(f"data: {line}\n\n".encode())
+    await resp.write(b"data: [DONE]\n\n")
+    await resp.write_eof()
+    return resp
+
+
+@pytest.fixture
+async def fake_hermes_url(aiohttp_server) -> str:
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", _fake_hermes_chat)
+    server = await aiohttp_server(app)
+    return f"http://127.0.0.1:{server.port}"
+
+
+async def test_hermes_adapter_parses_openai_sse_stream(fake_hermes_url: str) -> None:
+    adapter = HermesAdapter(fake_hermes_url, request_timeout=5)
+    deltas: List[str] = []
+    async for d in adapter.stream_chat(text="testing 123"):
+        deltas.append(d)
+    assert "".join(deltas) == "ouvi-te dizer: testing 123. confirmado."
+
+
+async def test_hermes_adapter_keeps_per_session_history(fake_hermes_url: str) -> None:
+    adapter = HermesAdapter(fake_hermes_url, request_timeout=5, history_turns=8)
+    # First turn populates history.
+    [_ async for _ in adapter.stream_chat(text="primeira", session_id="s1")]
+    # Verify history exists for the session.
+    assert adapter._session_messages("s1") == [  # type: ignore[attr-defined]
+        {"role": "user", "content": "primeira"},
+        {"role": "assistant", "content": "ouvi-te dizer: primeira. confirmado."},
+    ]
+    adapter.forget("s1")
+    assert adapter._session_messages("s1") == []  # type: ignore[attr-defined]
+
+
+async def test_hermes_adapter_propagates_upstream_failure(aiohttp_server) -> None:
+    async def boom(_request: web.Request) -> web.Response:
+        return web.Response(status=503, text="overloaded")
+
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", boom)
+    server = await aiohttp_server(app)
+    adapter = HermesAdapter(f"http://127.0.0.1:{server.port}", request_timeout=5)
+    with pytest.raises(Exception, match="hermes returned 503"):
+        async for _ in adapter.stream_chat(text="x"):
+            pass

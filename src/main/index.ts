@@ -10,6 +10,7 @@ import { createSttAdapter } from './services/stt-service';
 import { createTtsAdapter } from './services/tts-service';
 import { ConversationOrchestrator } from './services/conversation-orchestrator';
 import { WakeWordService } from './services/wake-word-service';
+import type { SttAdapter, ProgressEvent as SttProgress } from './services/stt-service';
 import { createTray } from './tray';
 import { registerHotkey } from './global-shortcut';
 import { resolveResource } from './asset-paths';
@@ -37,9 +38,46 @@ let unregisterHotkey: () => void = () => undefined;
 let client: HermesClient | null = null;
 let orchestrator: ConversationOrchestrator | null = null;
 let wake: WakeWordService | null = null;
+// Currently we only need to hand the adapter to prepareStt(); rebuilds drop
+// the reference. Keep the variable around so future actions (re-prepare on
+// settings change, surface the adapter to a "test recognition" button, etc)
+// don't need plumbing.
+let _activeStt: SttAdapter | null = null;
+type SttStatus =
+  | { state: 'idle' }
+  | { state: 'preparing'; progress?: SttProgress }
+  | { state: 'ready' }
+  | { state: 'error'; message: string };
+let sttStatus: SttStatus = { state: 'idle' };
 
 function send(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
+}
+
+function setSttStatus(next: SttStatus): void {
+  sttStatus = next;
+  send(IPC.STT_STATUS, next);
+}
+
+async function prepareStt(stt: SttAdapter): Promise<void> {
+  if (await stt.isReady()) {
+    setSttStatus({ state: 'ready' });
+    return;
+  }
+  setSttStatus({ state: 'preparing' });
+  try {
+    await stt.prepare((p) => {
+      sttStatus = { state: 'preparing', progress: p };
+      send(IPC.STT_STATUS, sttStatus);
+      send(IPC.STT_PROGRESS, p);
+    });
+    setSttStatus({ state: 'ready' });
+    log.info('[VG] stt ready');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'erro desconhecido';
+    log.warn('[VG] stt prepare failed:', message);
+    setSttStatus({ state: 'error', message });
+  }
 }
 
 function bootstrapConversation(): void {
@@ -50,9 +88,13 @@ function bootstrapConversation(): void {
     client = null;
   }
   client = new HermesClient();
-  const stt = createSttAdapter(s.stt);
+  // autoInstall: true so a fresh macOS install can self-bootstrap whisper.cpp
+  // via Homebrew on first use, without bouncing the user back to a terminal.
+  const stt = createSttAdapter(s.stt, { autoInstall: true });
+  _activeStt = stt;
   const tts = createTtsAdapter(s.tts);
   orchestrator = new ConversationOrchestrator(client, stt, tts, s);
+  void prepareStt(stt);
 
   client.on('status', (status, info) => {
     send(IPC.CONNECTION_STATUS, { status, ...info });
@@ -142,7 +184,12 @@ function createMainWindow(): BrowserWindow {
     },
   });
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    win.show();
+    // Resend the current STT status to the freshly-loaded renderer so it
+    // never starts with a stale "preparing…" UI on second window opens.
+    send(IPC.STT_STATUS, sttStatus);
+  });
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });

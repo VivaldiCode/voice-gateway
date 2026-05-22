@@ -72,6 +72,7 @@ export const IPC = {
   WAKE_DETECTED: 'vg:wake:detected',
   WAKE_STATUS: 'vg:wake:status',
   STT_PROGRESS: 'vg:stt:progress',
+  STT_STATUS: 'vg:stt:status',
   TTS_PROGRESS: 'vg:tts:progress',
   LOG: 'vg:log',
 } as const;
