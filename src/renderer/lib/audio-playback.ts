@@ -34,6 +34,13 @@ export class AudioPlayback {
 
   private getCtx(): AudioContext {
     if (!this.ctx) this.ctx = new AudioContext();
+    // Chromium's audio policy suspends AudioContexts that aren't created
+    // during a user gesture. Resume on every entry — resume() is a no-op
+    // when the context is already running, and is allowed any time after
+    // the user has already interacted with the page once.
+    if (this.ctx.state === 'suspended') {
+      void this.ctx.resume();
+    }
     return this.ctx;
   }
 
@@ -43,6 +50,11 @@ export class AudioPlayback {
     this.startedEmitted = false;
     this.mp3Chunks = [];
     this.nextStartAt = 0;
+    // Eagerly create + resume the AudioContext now, while we still have the
+    // user-gesture stack frame from the click handler. Without this, the
+    // context created on the first chunk arrival (after an IPC round-trip)
+    // stays suspended and source.start() produces silence.
+    this.getCtx();
   }
 
   pushChunk(chunk: Uint8Array, format: PlaybackFormat): void {

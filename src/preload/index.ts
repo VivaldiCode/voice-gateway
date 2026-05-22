@@ -71,7 +71,12 @@ const api = {
     ): Promise<{ ok: boolean; voices: Array<{ id: string; name: string; language?: string; description?: string; preview_url?: string }>; message?: string }> =>
       ipcRenderer.invoke(IPC.TTS_LIST_VOICES, req),
     test: (
-      req: { provider: 'piper_local' | 'elevenlabs'; text: string; elevenlabs?: ElevenLabsConfig },
+      req: {
+        provider: 'piper_local' | 'elevenlabs';
+        text: string;
+        elevenlabs?: ElevenLabsConfig;
+        piperVoiceId?: string;
+      },
     ): Promise<{ ok: boolean; message?: string }> => ipcRenderer.invoke(IPC.TTS_TEST, req),
     onTestChunk: (
       cb: (c: { seq: number; format: string; data: string; done?: boolean }) => void,

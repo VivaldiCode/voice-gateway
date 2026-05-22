@@ -237,6 +237,8 @@ export interface TestVoiceRequest {
   provider: 'piper_local' | 'elevenlabs';
   text: string;
   elevenlabs?: ElevenLabsConfig;
+  /** Required when provider === 'piper_local' — id of the voice model on disk. */
+  piperVoiceId?: string;
 }
 
 export type TestTtsChunkPayload = {
@@ -262,7 +264,15 @@ export async function testVoice(
     }
     adapter = new ElevenLabsAdapter({ config: req.elevenlabs });
   } else {
-    adapter = new PiperAdapter({ config: { modelId: 'en_US-lessac-medium' } });
+    const modelId = req.piperVoiceId ?? 'en_US-lessac-medium';
+    adapter = new PiperAdapter({ config: { modelId }, autoInstall: true });
+    if (!(await adapter.isReady())) {
+      return {
+        ok: false,
+        message:
+          'A voz Piper escolhida ainda não está pronta. Volta ao topo de Definições > Voz e carrega "Descarregar voz agora".',
+      };
+    }
   }
   return await new Promise<{ ok: boolean; message?: string }>((resolve) => {
     let settled = false;

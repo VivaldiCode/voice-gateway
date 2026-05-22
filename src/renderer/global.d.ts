@@ -82,6 +82,7 @@ interface VgApi {
       provider: 'piper_local' | 'elevenlabs';
       text: string;
       elevenlabs?: ElevenLabsConfig;
+      piperVoiceId?: string;
     }) => Promise<{ ok: boolean; message?: string }>;
     onTestChunk: (
       cb: (c: { seq: number; format: string; data: string; done?: boolean }) => void,

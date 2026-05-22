@@ -382,7 +382,10 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
   const onTest = useCallback(async () => {
     setTesting(true);
     setTestError(null);
-    testPlayback.beginUtterance('mp3');
+    // Initialise playback inside the user-gesture stack so the AudioContext
+    // is allowed to resume; the format is overridden mid-stream anyway if
+    // the actual chunks declare something different.
+    testPlayback.beginUtterance(provider === 'elevenlabs' ? 'mp3' : 'pcm16_22050');
     try {
       const r = await window.vg.tts.test({
         provider,
@@ -391,12 +394,13 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
           provider === 'elevenlabs'
             ? { ...settings.tts.elevenlabs, apiKey: elKey, voiceId }
             : undefined,
+        piperVoiceId: provider === 'piper_local' ? piperVoiceId : undefined,
       });
       if (!r.ok) setTestError(r.message ?? 'Falhou.');
     } finally {
       setTesting(false);
     }
-  }, [provider, elKey, voiceId, settings.tts.elevenlabs, testPlayback]);
+  }, [provider, elKey, voiceId, piperVoiceId, settings.tts.elevenlabs, testPlayback]);
 
   return (
     <div className="flex flex-col gap-5">
