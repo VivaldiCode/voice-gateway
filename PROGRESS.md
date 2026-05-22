@@ -54,8 +54,13 @@ Sessão iniciada em 2026-05-22.
 ### Phase 9 — Docs ✅
 - `README.md`, `docs/SETUP.md`, `docs/PROTOCOL.md`, `docs/ARCHITECTURE.md`, `docs/TROUBLESHOOTING.md` com conteúdo real.
 
-### Phase 10 — Quality gates
-Status: in progress.
+### Phase 10 — Quality gates ✅
+- `npm run typecheck` — verde.
+- `npm run lint --max-warnings=0` — verde.
+- `npm test` — 100 testes verde (FSM, protocol, settings store, pair-test, hermes-client, stt, tts, orchestrator, wake-word).
+- `npm run test:e2e` — 2 Playwright cases verde.
+- `pytest` no server — 13 cases verde.
+- `npm run build:mac` — `release/Voice Gateway-0.1.0-arm64.dmg` (97 MB). asar foi desligado porque a drive externa corrompe a integridade ASAR; em ambiente normal (APFS) deve voltar a ser `asar: true`.
 
 ## Decisões transversais
 - **electron-vite** com preload emitido como **CJS** (`.cjs`) — sandbox:true não carrega preloads ESM.

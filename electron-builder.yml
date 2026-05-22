@@ -1,7 +1,7 @@
 appId: dev.voicegateway.app
 productName: Voice Gateway
 copyright: Copyright © 2026 Voice Gateway contributors
-asar: true
+asar: false
 directories:
   output: release
   buildResources: resources
@@ -23,22 +23,19 @@ mac:
     - target: dmg
       arch:
         - arm64
-        - x64
   hardenedRuntime: true
   gatekeeperAssess: false
-  icon: resources/icons/icon.icns
+  identity: null
+  icon: resources/icon.png
 linux:
   target:
     - AppImage
-    - deb
   category: AudioVideo
-  icon: resources/icons
 win:
   target:
     - target: nsis
       arch:
         - x64
-  icon: resources/icons/icon.ico
 nsis:
   oneClick: false
   perMachine: false
