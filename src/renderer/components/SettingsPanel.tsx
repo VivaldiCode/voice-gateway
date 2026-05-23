@@ -17,6 +17,12 @@ import type {
   TtsProvider,
 } from '../../shared/types';
 import { PIPER_VOICES } from '../../shared/piper-voices';
+import {
+  DEFAULT_TEST_TEXT,
+  MAX_TEST_TEXT_LENGTH,
+  canSubmitTestText,
+  prepareTestText,
+} from '../../shared/tts-test-text';
 import type { SttStatus, TtsStatus, VoiceInfo } from '../global';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 
@@ -415,6 +421,7 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
   const [voicesError, setVoicesError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
+  const [testText, setTestText] = useState('');
   const [ttsStatus, setTtsStatus] = useState<TtsStatus>({ state: 'idle' });
   const [downloading, setDownloading] = useState(false);
 
@@ -492,6 +499,10 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
   const onTest = useCallback(async () => {
     setTesting(true);
     setTestError(null);
+    // Sanitise the user-typed text: trim, collapse internal whitespace, cap
+    // to MAX_TEST_TEXT_LENGTH, and fall back to DEFAULT_TEST_TEXT if the
+    // textarea is empty. See prepareTestText (shared/tts-test-text.ts).
+    const spoken = prepareTestText(testText);
     // Initialise playback inside the user-gesture stack so the AudioContext
     // is allowed to resume; the format is overridden mid-stream anyway if
     // the actual chunks declare something different.
@@ -499,7 +510,7 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
     try {
       const r = await window.vg.tts.test({
         provider,
-        text: 'Olá, eu sou o Hermes. Que bom ouvir-te.',
+        text: spoken,
         elevenlabs:
           provider === 'elevenlabs'
             ? { ...settings.tts.elevenlabs, apiKey: elKey, voiceId }
@@ -510,7 +521,7 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
     } finally {
       setTesting(false);
     }
-  }, [provider, elKey, voiceId, piperVoiceId, settings.tts.elevenlabs, testPlayback]);
+  }, [provider, elKey, voiceId, piperVoiceId, settings.tts.elevenlabs, testPlayback, testText]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -621,17 +632,59 @@ function VozTab({ settings }: { settings: Settings }): JSX.Element {
       )}
 
       <Section title="Testar voz">
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={onTest}
-            loading={testing}
-            size="md"
-            disabled={provider === 'piper_local' && ttsStatus.state !== 'ready'}
+        <div className="flex flex-col gap-2">
+          <label
+            htmlFor="vg-tts-test-text"
+            className="text-xs uppercase tracking-wider text-zinc-500"
           >
-            <Play className="mr-1 h-4 w-4" />
-            {testing ? 'a sintetizar…' : 'Reproduzir amostra'}
-          </Button>
-          <span className="text-xs text-zinc-500">&ldquo;Olá, eu sou o Hermes…&rdquo;</span>
+            Texto a ler
+          </label>
+          <textarea
+            id="vg-tts-test-text"
+            data-testid="tts-test-text"
+            value={testText}
+            onChange={(e) => setTestText(e.target.value.slice(0, MAX_TEST_TEXT_LENGTH))}
+            placeholder={DEFAULT_TEST_TEXT}
+            maxLength={MAX_TEST_TEXT_LENGTH}
+            rows={3}
+            aria-label="Texto a ler"
+            className="w-full resize-y rounded-xl border border-bg-subtle bg-bg px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+          <div className="flex items-center justify-between text-[11px] text-zinc-500">
+            <span>
+              {testText.trim().length === 0
+                ? 'Vazio → será lido o texto de exemplo.'
+                : 'O texto fica só aqui — não é enviado para o servidor.'}
+            </span>
+            <span data-testid="tts-test-char-count">
+              {testText.length}/{MAX_TEST_TEXT_LENGTH}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              onClick={onTest}
+              loading={testing}
+              size="md"
+              data-testid="tts-test-button"
+              disabled={
+                !canSubmitTestText(testText) ||
+                (provider === 'piper_local' && ttsStatus.state !== 'ready')
+              }
+            >
+              <Play className="mr-1 h-4 w-4" />
+              {testing ? 'a sintetizar…' : 'Reproduzir'}
+            </Button>
+            {testText.trim().length > 0 && (
+              <button
+                type="button"
+                onClick={() => setTestText('')}
+                className="text-xs text-zinc-400 hover:text-white"
+                data-testid="tts-test-reset"
+              >
+                limpar
+              </button>
+            )}
+          </div>
         </div>
         {testError && <CommandHint message={testError} variant="error" />}
       </Section>

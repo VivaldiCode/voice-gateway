@@ -181,7 +181,7 @@ icon) has six tabs:
 
 | Tab | What it controls |
 |---|---|
-| **Voz** | TTS provider (Piper / ElevenLabs), voice picker, sample test |
+| **Voz** | TTS provider (Piper / ElevenLabs), voice picker, voice-test textarea (type any phrase to hear it spoken) |
 | **Microfone** | Input device picker, macOS permission diagnostic, live VU meter |
 | **Reconhecimento** | STT provider, Whisper model size, language, OpenAI key |
 | **Ativação** | PTT vs wake word, hotkey, **minimum audio length** (filters accidental taps before they hit STT) |

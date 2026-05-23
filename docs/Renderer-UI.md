@@ -182,7 +182,7 @@ on blur, except booleans/selects which persist immediately).
 
 | Tab            | Source                                                                                                                                            |
 |----------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| Voz            | TTS provider switch, Piper voice picker + "Test", ElevenLabs key + voice catalogue                                                                |
+| Voz            | TTS provider switch, Piper voice picker, ElevenLabs key + catalogue, **voice-test textarea** (type a phrase, hit Reproduzir — uses `prepareTestText` from `shared/tts-test-text.ts` to sanitise + cap at 500 chars) |
 | Microfone      | Input device dropdown, mic status pill (see [[macOS-Permissions#diagnostic-ui]]), live VU meter from `AudioCapture.onLevel`                       |
 | Reconhecimento | STT provider switch, Whisper model size, language, OpenAI API key                                                                                 |
 | Ativação       | PTT vs wake word, hotkey input, **Minimum audio length** slider (filters accidental taps)                                                         |

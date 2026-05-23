@@ -249,6 +249,16 @@ export type TestTtsChunkPayload = {
   done?: boolean;
 };
 
+export interface TestVoiceOptions {
+  /**
+   * Override the adapter resolution. When provided, skips the
+   * Piper/ElevenLabs construction and uses this instance directly. Intended
+   * for tests that want to assert the synthesised text without spawning a
+   * real binary or hitting the network.
+   */
+  adapterOverride?: TtsAdapter;
+}
+
 /**
  * Run a one-shot TTS synthesis without going through the conversation
  * pipeline. Pushes audio chunks back to the renderer via a dedicated IPC
@@ -257,9 +267,12 @@ export type TestTtsChunkPayload = {
 export async function testVoice(
   req: TestVoiceRequest,
   onChunk: (c: TestTtsChunkPayload) => void,
+  opts: TestVoiceOptions = {},
 ): Promise<{ ok: boolean; message?: string }> {
   let adapter: TtsAdapter;
-  if (req.provider === 'elevenlabs') {
+  if (opts.adapterOverride) {
+    adapter = opts.adapterOverride;
+  } else if (req.provider === 'elevenlabs') {
     if (!req.elevenlabs?.apiKey || !req.elevenlabs?.voiceId) {
       return { ok: false, message: 'Falta a chave API ou a voz.' };
     }
