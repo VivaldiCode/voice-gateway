@@ -61,6 +61,26 @@ const api = {
     openMicSettings: (): Promise<boolean> => ipcRenderer.invoke(IPC.AUDIO_OPEN_MIC_SETTINGS),
   },
 
+  wake: {
+    /** Spin up an ephemeral wake-word runner for the "Testar" button. */
+    testStart: (
+      req: { mode: 'openww' | 'phrase'; model?: string; phrase?: string; language?: string },
+    ): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke(IPC.WAKE_TEST_START, req),
+    /** Stop the ephemeral runner (called on dialog close / mode toggle). */
+    testStop: (): void => ipcRenderer.send(IPC.WAKE_TEST_STOP),
+    onTestEvent: (
+      cb: (
+        e:
+          | { event: 'ready'; models?: string[]; phrase?: string }
+          | { event: 'wake'; model?: string; phrase?: string; score?: number; transcript?: string }
+          | { event: 'transcript'; text: string }
+          | { event: 'error'; message: string }
+          | { event: 'exit' },
+      ) => void,
+    ): (() => void) => on(IPC.WAKE_TEST_EVENT, cb),
+  },
+
   stt: {
     onStatus: (
       cb: (

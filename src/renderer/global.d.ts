@@ -97,6 +97,25 @@ interface VgApi {
     prepare: () => Promise<{ ok: boolean; message?: string }>;
     onStatus: (cb: (s: TtsStatus) => void) => () => void;
   };
+  wake: {
+    testStart: (req: {
+      mode: 'openww' | 'phrase';
+      model?: string;
+      phrase?: string;
+      language?: string;
+    }) => Promise<{ ok: boolean; message?: string }>;
+    testStop: () => void;
+    onTestEvent: (
+      cb: (
+        e:
+          | { event: 'ready'; models?: string[]; phrase?: string }
+          | { event: 'wake'; model?: string; phrase?: string; score?: number; transcript?: string }
+          | { event: 'transcript'; text: string }
+          | { event: 'error'; message: string }
+          | { event: 'exit' },
+      ) => void,
+    ) => () => void;
+  };
 }
 
 declare global {

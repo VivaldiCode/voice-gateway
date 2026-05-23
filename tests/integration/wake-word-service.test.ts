@@ -2,13 +2,18 @@ import { EventEmitter, Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { WakeWordService } from '@main/services/wake-word-service';
 
-function fakeSpawn(linesToEmit: string[]): {
+interface FakeProcResult {
   spawnImpl: NonNullable<ConstructorParameters<typeof WakeWordService>[0]>['spawnImpl'];
   killed: { v: boolean };
-} {
+  /** All `args` from successive spawn() calls, in order. */
+  argCalls: string[][];
+}
+
+function fakeSpawn(linesToEmit: string[]): FakeProcResult {
   const killed = { v: false };
+  const argCalls: string[][] = [];
   const spawnImpl = ((_path: string, args: string[]) => {
-    void args;
+    argCalls.push(args);
     const stdout = new Readable({ read() {} });
     const stderr = new Readable({ read() {} });
     const proc = new EventEmitter() as EventEmitter & {
@@ -27,51 +32,77 @@ function fakeSpawn(linesToEmit: string[]): {
       stdout.push(null);
     });
     return proc;
-  }) as unknown as NonNullable<ConstructorParameters<typeof WakeWordService>[0]>['spawnImpl'];
-  return { spawnImpl, killed };
+  }) as unknown as FakeProcResult['spawnImpl'];
+  return { spawnImpl, killed, argCalls };
 }
 
-describe('WakeWordService', () => {
+function makeSvc(spawnImpl: FakeProcResult['spawnImpl']): WakeWordService {
+  // autoInstall:false so resolvePython() short-circuits to the explicit exe.
+  return new WakeWordService({
+    spawnImpl,
+    scriptPath: '/tmp/x.py',
+    pythonExe: 'python3',
+    autoInstall: false,
+  });
+}
+
+describe('WakeWordService (openww mode)', () => {
   it('parses ready + wake events from stdout JSON lines', async () => {
     const { spawnImpl } = fakeSpawn([
       JSON.stringify({ event: 'ready', models: ['hey_jarvis'] }),
       JSON.stringify({ event: 'wake', model: 'hey_jarvis', score: 0.81 }),
     ]);
-    const svc = new WakeWordService({ spawnImpl, scriptPath: '/tmp/x.py', pythonExe: 'python3' });
-    const ready: string[][] = [];
-    const wakes: Array<[string, number]> = [];
-    svc.on('ready', (m) => ready.push(m));
-    svc.on('wake', (m, s) => wakes.push([m, s]));
-    svc.start('hey_jarvis');
+    const svc = makeSvc(spawnImpl);
+    const readyEvents: Array<{ models?: string[]; phrase?: string }> = [];
+    const wakeEvents: Array<{ model?: string; score?: number }> = [];
+    svc.on('ready', (info) => readyEvents.push(info));
+    svc.on('wake', (info) => wakeEvents.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(ready[0]).toEqual(['hey_jarvis']);
-    expect(wakes[0]).toEqual(['hey_jarvis', 0.81]);
+    expect(readyEvents[0]).toEqual({ models: ['hey_jarvis'] });
+    expect(wakeEvents[0]).toEqual({ model: 'hey_jarvis', score: 0.81 });
   });
 
   it('ignores malformed JSON lines silently', async () => {
-    const { spawnImpl } = fakeSpawn(['not json', 'still nope', JSON.stringify({ event: 'ready', models: ['x'] })]);
-    const svc = new WakeWordService({ spawnImpl, scriptPath: '/tmp/x.py' });
-    const ready: string[][] = [];
-    svc.on('ready', (m) => ready.push(m));
-    svc.start('hey_jarvis');
+    const { spawnImpl } = fakeSpawn([
+      'not json',
+      'still nope',
+      JSON.stringify({ event: 'ready', models: ['x'] }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const readyEvents: Array<{ models?: string[] }> = [];
+    svc.on('ready', (info) => readyEvents.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(ready[0]).toEqual(['x']);
+    expect(readyEvents[0]).toEqual({ models: ['x'] });
   });
 
   it('emits error event on JSON error messages', async () => {
     const { spawnImpl } = fakeSpawn([JSON.stringify({ event: 'error', message: 'no mic' })]);
-    const svc = new WakeWordService({ spawnImpl, scriptPath: '/tmp/x.py' });
+    const svc = makeSvc(spawnImpl);
     const errs: string[] = [];
     svc.on('error', (m) => errs.push(m));
-    svc.start('hey_jarvis');
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
     await new Promise((r) => setTimeout(r, 20));
     expect(errs[0]).toBe('no mic');
   });
 
+  it('passes --mode openww and the right --model/--threshold to the runner', async () => {
+    const { spawnImpl, argCalls } = fakeSpawn([]);
+    const svc = makeSvc(spawnImpl);
+    await svc.start({ mode: 'openww', model: 'computer', threshold: 0.7 });
+    expect(argCalls[0]).toEqual([
+      '/tmp/x.py',
+      '--mode', 'openww',
+      '--model', 'computer',
+      '--threshold', '0.7',
+    ]);
+  });
+
   it('stop kills the running process and clears state', async () => {
     const { spawnImpl, killed } = fakeSpawn([]);
-    const svc = new WakeWordService({ spawnImpl, scriptPath: '/tmp/x.py' });
-    svc.start('hey_jarvis');
+    const svc = makeSvc(spawnImpl);
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
     expect(svc.isRunning()).toBe(true);
     svc.stop();
     await new Promise((r) => setTimeout(r, 5));
@@ -79,17 +110,124 @@ describe('WakeWordService', () => {
     expect(svc.isRunning()).toBe(false);
   });
 
-  it('start is a no-op if already running', () => {
+  it('start is a no-op if already running', async () => {
     let spawnCalls = 0;
     const { spawnImpl } = fakeSpawn([]);
     const inner = spawnImpl as unknown as (p: string, a: string[], o?: unknown) => unknown;
     const wrapped = ((path: string, args: string[], opts?: unknown) => {
       spawnCalls += 1;
       return inner(path, args, opts);
-    }) as unknown as NonNullable<ConstructorParameters<typeof WakeWordService>[0]>['spawnImpl'];
-    const svc = new WakeWordService({ spawnImpl: wrapped, scriptPath: '/tmp/x.py' });
-    svc.start('hey_jarvis');
-    svc.start('hey_jarvis');
+    }) as unknown as FakeProcResult['spawnImpl'];
+    const svc = makeSvc(wrapped);
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
     expect(spawnCalls).toBe(1);
+  });
+});
+
+describe('WakeWordService (phrase mode)', () => {
+  it('passes --mode phrase with the phrase and whisper paths', async () => {
+    const { spawnImpl, argCalls } = fakeSpawn([]);
+    const svc = makeSvc(spawnImpl);
+    await svc.start({
+      mode: 'phrase',
+      phrase: 'hey hermes',
+      whisperBin: '/usr/local/bin/whisper-cli',
+      whisperModel: '/tmp/ggml-base.bin',
+      language: 'pt',
+    });
+    expect(argCalls[0]).toEqual([
+      '/tmp/x.py',
+      '--mode', 'phrase',
+      '--phrase', 'hey hermes',
+      '--whisper-bin', '/usr/local/bin/whisper-cli',
+      '--whisper-model', '/tmp/ggml-base.bin',
+      '--language', 'pt',
+      '--cooldown', '1.5',
+    ]);
+  });
+
+  it('emits ready { phrase } and wake { phrase, transcript }', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'ready', phrase: 'hey hermes' }),
+      JSON.stringify({ event: 'wake', phrase: 'hey hermes', transcript: 'Hey, Hermes!' }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const ready: Array<{ phrase?: string }> = [];
+    const wakes: Array<{ phrase?: string; transcript?: string }> = [];
+    svc.on('ready', (info) => ready.push(info));
+    svc.on('wake', (info) => wakes.push(info));
+    await svc.start({
+      mode: 'phrase',
+      phrase: 'hey hermes',
+      whisperBin: '/x',
+      whisperModel: '/y',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ready[0]).toEqual({ phrase: 'hey hermes' });
+    expect(wakes[0]).toEqual({ phrase: 'hey hermes', transcript: 'Hey, Hermes!' });
+  });
+
+  it('forwards `transcript` events (live preview during test)', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'ready', phrase: 'hey hermes' }),
+      JSON.stringify({ event: 'transcript', text: 'olá mundo' }),
+      JSON.stringify({ event: 'transcript', text: 'hey hermes please' }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const texts: string[] = [];
+    svc.on('transcript', (t) => texts.push(t));
+    await svc.start({
+      mode: 'phrase',
+      phrase: 'hey hermes',
+      whisperBin: '/x',
+      whisperModel: '/y',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(texts).toEqual(['olá mundo', 'hey hermes please']);
+  });
+
+  it('uses default cooldown=1.5 and language=auto when omitted', async () => {
+    const { spawnImpl, argCalls } = fakeSpawn([]);
+    const svc = makeSvc(spawnImpl);
+    await svc.start({
+      mode: 'phrase',
+      phrase: 'hey hermes',
+      whisperBin: '/a',
+      whisperModel: '/b',
+    });
+    expect(argCalls[0]).toContain('--cooldown');
+    expect(argCalls[0]?.[argCalls[0].indexOf('--cooldown') + 1]).toBe('1.5');
+    expect(argCalls[0]?.[argCalls[0].indexOf('--language') + 1]).toBe('auto');
+  });
+});
+
+describe('WakeWordService (python resolution)', () => {
+  it('emits friendly error when no python3 is available', async () => {
+    const { spawnImpl } = fakeSpawn([]);
+    const svc = new WakeWordService({
+      spawnImpl,
+      scriptPath: '/tmp/x.py',
+      autoInstall: false,
+      whichImpl: async () => null, // nothing on PATH
+    });
+    const errs: string[] = [];
+    svc.on('error', (m) => errs.push(m));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    expect(errs[0]).toMatch(/python3/i);
+    expect(svc.isRunning()).toBe(false);
+  });
+
+  it('uses the system python3 when the venv doesn\'t exist and autoInstall is off', async () => {
+    const { spawnImpl, argCalls } = fakeSpawn([]);
+    const svc = new WakeWordService({
+      spawnImpl,
+      scriptPath: '/tmp/x.py',
+      autoInstall: false,
+      whichImpl: async (cmd) => (cmd === 'python3' ? '/usr/bin/python3' : null),
+    });
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    // First (and only) spawn call should be against the resolved python3.
+    expect(argCalls).toHaveLength(1);
   });
 });

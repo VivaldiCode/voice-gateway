@@ -5,8 +5,9 @@ import { dirname, join } from 'node:path';
 import { IPC } from '@shared/constants';
 import { createSettingsStore } from './services/settings-store';
 import { registerIpcHandlers } from './ipc-handlers';
+import { promises as fs } from 'node:fs';
 import { HermesClient } from './services/hermes-client';
-import { createSttAdapter } from './services/stt-service';
+import { createSttAdapter, WhisperLocalAdapter } from './services/stt-service';
 import { createTtsAdapter } from './services/tts-service';
 import { ConversationOrchestrator } from './services/conversation-orchestrator';
 import { WakeWordService } from './services/wake-word-service';
@@ -277,31 +278,153 @@ function rebuildHotkey(): void {
   });
 }
 
-function rebuildWakeWord(): void {
+/**
+ * Resolve the (binary, model) pair the phrase-mode wake runner needs. Returns
+ * a string error when something is missing so callers can surface it as a
+ * friendly UI hint. Tries whatever local whisper adapter we already built; if
+ * STT is on OpenAI we still construct a transient `WhisperLocalAdapter` so the
+ * user can use phrase wake mode independently of their STT choice.
+ */
+async function resolveWhisperPathsForWake(): Promise<
+  { ok: true; binary: string; model: string } | { ok: false; reason: string }
+> {
+  const adapter =
+    activeStt instanceof WhisperLocalAdapter
+      ? activeStt
+      : new WhisperLocalAdapter({
+          config: { model: 'base' },
+          autoInstall: true,
+        });
+  const binary = await adapter.resolveBinaryPath();
+  if (!binary) {
+    return {
+      ok: false,
+      reason:
+        'Para usar uma frase personalizada, instala primeiro o whisper.cpp ' +
+        '(macOS: `brew install whisper-cpp`).',
+    };
+  }
+  const model = adapter.resolveModelPath();
+  try {
+    await fs.access(model);
+  } catch {
+    return {
+      ok: false,
+      reason:
+        'O modelo do whisper ainda não está descarregado. Abre Definições → Reconhecimento e ' +
+        'carrega "Descarregar modelo" antes de usar a frase personalizada.',
+    };
+  }
+  return { ok: true, binary, model };
+}
+
+async function rebuildWakeWord(): Promise<void> {
   wake?.stop();
   wake = null;
   const s = settings.get();
   if (s.activation.mode !== 'WAKE_WORD') return;
   if (!orchestrator) return;
   wake = new WakeWordService();
-  wake.on('wake', (model) => {
-    log.info('[VG] wake detected:', model);
+  const curr = wake;
+  curr.on('wake', (info) => {
+    log.info('[VG] wake detected:', info);
     orchestrator?.wakeDetected();
   });
-  wake.on('error', (msg) => {
+  curr.on('error', (msg) => {
     log.warn('[VG] wake-word error:', msg);
     send(IPC.WAKE_STATUS, { running: false, error: msg });
   });
-  wake.on('ready', (models) => send(IPC.WAKE_STATUS, { running: true, models }));
-  try {
-    wake.start(s.activation.wakeWord, 0.5);
-  } catch (err) {
-    log.warn('[VG] wake-word failed to start:', err);
-    send(IPC.WAKE_STATUS, {
-      running: false,
-      error: 'Não consegui iniciar o detector. Verifica se tens o python3 e openwakeword instalados.',
+  curr.on('ready', (info) => send(IPC.WAKE_STATUS, { running: true, ...info }));
+
+  if (s.activation.wakeMode === 'phrase') {
+    const paths = await resolveWhisperPathsForWake();
+    if (!paths.ok) {
+      send(IPC.WAKE_STATUS, { running: false, error: paths.reason });
+      return;
+    }
+    await curr.start({
+      mode: 'phrase',
+      phrase: s.activation.wakePhrase,
+      whisperBin: paths.binary,
+      whisperModel: paths.model,
+      language: s.stt.language === 'auto' ? 'auto' : s.stt.language,
+    });
+  } else {
+    await curr.start({
+      mode: 'openww',
+      model: s.activation.wakeWord,
+      threshold: 0.5,
     });
   }
+}
+
+// ───────── Test-button runner ─────────
+// A second WakeWordService instance dedicated to the Settings → Ativação
+// "Testar" button. Kept separate from the production `wake` so toggling test
+// mode never interrupts a live wake-word session.
+
+let testWake: WakeWordService | null = null;
+
+function stopTestWake(): void {
+  testWake?.stop();
+  testWake = null;
+}
+
+async function startTestWake(req: {
+  mode: 'openww' | 'phrase';
+  model?: string;
+  phrase?: string;
+  language?: string;
+}): Promise<{ ok: boolean; message?: string }> {
+  stopTestWake();
+  const svc = new WakeWordService();
+  testWake = svc;
+  svc.on('ready', (info) =>
+    send(IPC.WAKE_TEST_EVENT, { event: 'ready', ...info }),
+  );
+  svc.on('wake', (info) => send(IPC.WAKE_TEST_EVENT, { event: 'wake', ...info }));
+  svc.on('transcript', (text) =>
+    send(IPC.WAKE_TEST_EVENT, { event: 'transcript', text }),
+  );
+  svc.on('error', (message) =>
+    send(IPC.WAKE_TEST_EVENT, { event: 'error', message }),
+  );
+  svc.on('exit', () => {
+    if (testWake === svc) testWake = null;
+    send(IPC.WAKE_TEST_EVENT, { event: 'exit' });
+  });
+
+  if (req.mode === 'phrase') {
+    if (!req.phrase || !req.phrase.trim()) {
+      stopTestWake();
+      return { ok: false, message: 'Escreve uma frase primeiro.' };
+    }
+    const paths = await resolveWhisperPathsForWake();
+    if (!paths.ok) {
+      stopTestWake();
+      return { ok: false, message: paths.reason };
+    }
+    await svc.start({
+      mode: 'phrase',
+      phrase: req.phrase,
+      whisperBin: paths.binary,
+      whisperModel: paths.model,
+      language: req.language ?? 'auto',
+    });
+    return { ok: true };
+  }
+  if (!req.model) {
+    stopTestWake();
+    return { ok: false, message: 'Escolhe uma palavra-chave primeiro.' };
+  }
+  await svc.start({
+    mode: 'openww',
+    // The runner accepts any string here; the TS type is narrower than what's
+    // actually valid (community models exist). We cast for the test path only.
+    model: req.model as never,
+    threshold: 0.5,
+  });
+  return { ok: true };
 }
 
 function createMainWindow(): BrowserWindow {
@@ -352,6 +475,15 @@ ipcMain.on(IPC.CONV_CANCEL, () => orchestrator?.cancel());
 ipcMain.on(IPC.CONV_BARGE_IN, () => orchestrator?.bargeIn());
 ipcMain.on(IPC.CONV_RESET, () => orchestrator?.reset());
 
+ipcMain.handle(
+  IPC.WAKE_TEST_START,
+  async (
+    _e,
+    req: { mode: 'openww' | 'phrase'; model?: string; phrase?: string; language?: string },
+  ) => startTestWake(req),
+);
+ipcMain.on(IPC.WAKE_TEST_STOP, () => stopTestWake());
+
 let lastSettingsSnapshot = JSON.stringify(settings.get());
 settings.onChange((next) => {
   // Rebuild the pipeline when pairing OR STT/TTS provider configuration
@@ -363,7 +495,7 @@ settings.onChange((next) => {
   }
   lastSettingsSnapshot = snap;
   rebuildHotkey();
-  rebuildWakeWord();
+  void rebuildWakeWord();
 });
 
 /**
@@ -404,7 +536,7 @@ app.whenReady().then(() => {
   void tray; // suppress unused warning until extended
   bootstrapConversation();
   rebuildHotkey();
-  rebuildWakeWord();
+  void rebuildWakeWord();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

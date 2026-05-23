@@ -8,7 +8,9 @@ import {
 } from '@shared/constants';
 import type { Settings } from '@shared/types';
 
-const SCHEMA_VERSION = 1;
+// v2: added activation.wakeMode + activation.wakePhrase. Old configs are
+// silently merged with the defaults on first boot.
+const SCHEMA_VERSION = 2;
 
 export function defaultSettings(): Settings {
   const isMac = process.platform === 'darwin';
@@ -17,6 +19,8 @@ export function defaultSettings(): Settings {
     activation: {
       mode: 'PUSH_TO_TALK',
       wakeWord: 'hey_jarvis',
+      wakeMode: 'openww',
+      wakePhrase: 'hey hermes',
       globalHotkey: isMac ? DEFAULT_GLOBAL_HOTKEY_MAC : DEFAULT_GLOBAL_HOTKEY_OTHER,
       vadThreshold: VAD_THRESHOLD_DEFAULT,
       vadSilenceMs: VAD_SILENCE_MS,

@@ -161,6 +161,24 @@ export class WhisperLocalAdapter implements SttAdapter {
   }
 
   /**
+   * Absolute path the adapter expects the model file at. Public so the
+   * wake-word phrase-mode runner can share the same model without copying.
+   * Doesn't check existence — caller should verify when needed.
+   */
+  resolveModelPath(): string {
+    return this.modelPath();
+  }
+
+  /**
+   * Best-effort whisper binary lookup. Public wrapper around the private
+   * discovery so other subsystems (e.g. the wake-word phrase mode) can reuse
+   * the same path without re-implementing the PATH search.
+   */
+  async resolveBinaryPath(): Promise<string | null> {
+    return this.discoverBinary();
+  }
+
+  /**
    * Locate a usable whisper binary. Order:
    *   1. The explicitly-preferred path (typically userData/whisper/bin/whisper)
    *   2. `whisper-cli` / `whisper-cpp` / `whisper` on PATH

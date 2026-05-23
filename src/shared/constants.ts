@@ -76,6 +76,13 @@ export const IPC = {
   CONV_RESET: 'vg:conv:reset',
   WAKE_DETECTED: 'vg:wake:detected',
   WAKE_STATUS: 'vg:wake:status',
+  /** Renderer asks main to spin up a sandboxed wake-word runner for the
+   *  Settings → Ativação "Testar" button. */
+  WAKE_TEST_START: 'vg:wake:test:start',
+  /** Renderer asks main to kill the test runner. */
+  WAKE_TEST_STOP: 'vg:wake:test:stop',
+  /** Main pushes events from the test runner back to the renderer. */
+  WAKE_TEST_EVENT: 'vg:wake:test:event',
   STT_PROGRESS: 'vg:stt:progress',
   STT_STATUS: 'vg:stt:status',
   STT_PREPARE: 'vg:stt:prepare',

@@ -61,9 +61,26 @@ export interface SttSettings {
   openai: OpenAiSttConfig;
 }
 
+/**
+ * Where the wake detection happens.
+ *
+ * - 'openww' — openWakeWord predefined models (low CPU, fixed phrase list).
+ * - 'phrase' — streaming whisper.cpp over rolling windows looking for an
+ *   arbitrary user-typed phrase. Higher CPU but works for "hey claude" or
+ *   any custom wake word the user wants.
+ */
+export type WakeMode = 'openww' | 'phrase';
+
 export interface ActivationSettings {
   mode: ActivationMode;
   wakeWord: WakeWord;
+  /** See {@link WakeMode}. */
+  wakeMode: WakeMode;
+  /**
+   * Custom phrase used when `wakeMode === 'phrase'`. Plain text; the matcher
+   * normalises whitespace, casing, and punctuation. Example: "hey hermes".
+   */
+  wakePhrase: string;
   globalHotkey: string;
   vadThreshold: number;
   vadSilenceMs: number;

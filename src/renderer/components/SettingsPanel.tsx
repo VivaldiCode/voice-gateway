@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Volume2, Mic2, Cable, Sliders, AlertTriangle, RefreshCw, Loader2, Play, Download } from 'lucide-react';
 import { Button } from './Button';
 import { CommandHint } from './CommandHint';
@@ -15,6 +15,7 @@ import type {
   Settings,
   SttProvider,
   TtsProvider,
+  WakeMode,
 } from '../../shared/types';
 import { PIPER_VOICES } from '../../shared/piper-voices';
 import {
@@ -23,6 +24,10 @@ import {
   canSubmitTestText,
   prepareTestText,
 } from '../../shared/tts-test-text';
+import {
+  MAX_WAKE_PHRASE_CHARS,
+  validateWakePhrase,
+} from '../../shared/wake-phrase';
 import type { SttStatus, TtsStatus, VoiceInfo } from '../global';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 
@@ -948,7 +953,9 @@ function ReconhecimentoTab({ settings }: { settings: Settings }): JSX.Element {
 
 function AtivacaoTab({ settings }: { settings: Settings }): JSX.Element {
   const [mode, setMode] = useState<ActivationMode>(settings.activation.mode);
+  const [wakeMode, setWakeMode] = useState<WakeMode>(settings.activation.wakeMode ?? 'openww');
   const [wakeWord, setWakeWord] = useState<WakeWord>(settings.activation.wakeWord);
+  const [wakePhrase, setWakePhrase] = useState(settings.activation.wakePhrase ?? 'hey hermes');
   const [hotkey, setHotkey] = useState(settings.activation.globalHotkey);
   const [minAudioMs, setMinAudioMs] = useState(settings.activation.minAudioMs ?? 300);
 
@@ -979,23 +986,77 @@ function AtivacaoTab({ settings }: { settings: Settings }): JSX.Element {
       </Section>
 
       {mode === 'WAKE_WORD' && (
-        <Section title="Palavra de ativação">
-          <select
-            value={wakeWord}
-            onChange={(e) => {
-              const w = e.target.value as WakeWord;
-              setWakeWord(w);
-              persist({ wakeWord: w });
-            }}
-            className="h-10 w-full rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
-          >
-            {SUPPORTED_WAKE_WORDS.map((w) => (
-              <option key={w} value={w}>
-                {w.replace(/_/g, ' ')}
-              </option>
-            ))}
-          </select>
-        </Section>
+        <>
+          <Section title="Tipo de deteção">
+            <ProviderToggle
+              options={[
+                {
+                  id: 'openww',
+                  label: 'Pré-definido',
+                  sub: 'Hey Jarvis, Alexa, Computer… (CPU baixo)',
+                },
+                {
+                  id: 'phrase',
+                  label: 'Frase personalizada',
+                  sub: 'usa o Whisper a escutar continuamente',
+                },
+              ]}
+              value={wakeMode}
+              onChange={(v) => {
+                const m = v as WakeMode;
+                setWakeMode(m);
+                persist({ wakeMode: m });
+              }}
+            />
+          </Section>
+
+          {wakeMode === 'openww' && (
+            <Section title="Palavra de ativação">
+              <select
+                value={wakeWord}
+                onChange={(e) => {
+                  const w = e.target.value as WakeWord;
+                  setWakeWord(w);
+                  persist({ wakeWord: w });
+                }}
+                className="h-10 w-full rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+              >
+                {SUPPORTED_WAKE_WORDS.map((w) => (
+                  <option key={w} value={w}>
+                    {w.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+              <WakeTester mode="openww" model={wakeWord} />
+            </Section>
+          )}
+
+          {wakeMode === 'phrase' && (
+            <Section title="Frase personalizada">
+              <input
+                type="text"
+                value={wakePhrase}
+                onChange={(e) => setWakePhrase(e.target.value.slice(0, MAX_WAKE_PHRASE_CHARS))}
+                onBlur={() => {
+                  const v = validateWakePhrase(wakePhrase);
+                  if (v.ok) persist({ wakePhrase });
+                }}
+                placeholder="hey hermes"
+                maxLength={MAX_WAKE_PHRASE_CHARS}
+                aria-label="Frase personalizada"
+                data-testid="wake-phrase-input"
+                className="h-10 w-full select-text rounded-xl border border-bg-subtle bg-bg px-3 text-sm text-white focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/40"
+              />
+              <PhraseValidationHint phrase={wakePhrase} />
+              <p className="text-xs text-zinc-500">
+                A app escuta continuamente em janelas de ~2&nbsp;s e usa o Whisper
+                local para procurar a tua frase. Precisa de mais CPU do que o
+                modo pré-definido.
+              </p>
+              <WakeTester mode="phrase" phrase={wakePhrase} language={settings.stt.language} />
+            </Section>
+          )}
+        </>
       )}
 
       <Section title="Atalho global">
@@ -1037,6 +1098,152 @@ function AtivacaoTab({ settings }: { settings: Settings }): JSX.Element {
           tocas no botão sem querer. Padrão: 300&nbsp;ms.
         </p>
       </Section>
+    </div>
+  );
+}
+
+function PhraseValidationHint({ phrase }: { phrase: string }): JSX.Element | null {
+  const r = validateWakePhrase(phrase);
+  if (r.ok) return null;
+  return (
+    <p className="text-xs text-amber-400" data-testid="wake-phrase-hint">
+      {r.reason}
+    </p>
+  );
+}
+
+type WakeTesterProps =
+  | { mode: 'openww'; model: string }
+  | { mode: 'phrase'; phrase: string; language: string };
+
+interface WakeTesterEvent {
+  type: 'idle' | 'starting' | 'ready' | 'wake' | 'transcript' | 'error' | 'done';
+  text?: string;
+}
+
+/** Reusable mini-UI: a "Testar" button + live status while a sandboxed
+ *  wake-word runner is spinning. Stops itself after a 20 s window or on
+ *  the first detection so we never leave a runner hanging in the background. */
+function WakeTester(props: WakeTesterProps): JSX.Element {
+  const [event, setEvent] = useState<WakeTesterEvent>({ type: 'idle' });
+  const [transcript, setTranscript] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const off = window.vg.wake.onTestEvent((e) => {
+      if (e.event === 'ready') setEvent({ type: 'ready' });
+      else if (e.event === 'transcript') setTranscript(e.text);
+      else if (e.event === 'wake') {
+        setEvent({ type: 'wake', text: e.transcript ?? e.phrase ?? e.model ?? '' });
+        window.vg.wake.testStop();
+        if (timerRef.current !== null) {
+          window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      } else if (e.event === 'error') setError(e.message);
+      else if (e.event === 'exit') {
+        // Process exited without firing — treat as done if we weren't already wake.
+        setEvent((cur) => (cur.type === 'wake' ? cur : { type: 'done' }));
+      }
+    });
+    return () => {
+      off();
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  // Stop any in-flight test if our props change (user switched modes mid-test).
+  // `target` is the model name for openww or the phrase for the custom path —
+  // either change should reset the tester.
+  const target = props.mode === 'phrase' ? props.phrase : props.model;
+  useEffect(() => {
+    window.vg.wake.testStop();
+    setEvent({ type: 'idle' });
+    setTranscript('');
+    setError(null);
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [props.mode, target]);
+
+  const phraseValid =
+    props.mode === 'openww' ? true : validateWakePhrase(props.phrase).ok;
+
+  const onTest = useCallback(async () => {
+    setError(null);
+    setTranscript('');
+    setEvent({ type: 'starting' });
+    const req =
+      props.mode === 'openww'
+        ? { mode: 'openww' as const, model: props.model }
+        : { mode: 'phrase' as const, phrase: props.phrase, language: props.language };
+    const r = await window.vg.wake.testStart(req);
+    if (!r.ok) {
+      setError(r.message ?? 'Falhou.');
+      setEvent({ type: 'idle' });
+      return;
+    }
+    // Auto-stop after 20 s if nothing fires.
+    timerRef.current = window.setTimeout(() => {
+      window.vg.wake.testStop();
+      setEvent((cur) => (cur.type === 'wake' ? cur : { type: 'done' }));
+      timerRef.current = null;
+    }, 20_000);
+  }, [props]);
+
+  const onStop = useCallback(() => {
+    window.vg.wake.testStop();
+    setEvent({ type: 'idle' });
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const active = event.type !== 'idle' && event.type !== 'wake' && event.type !== 'done';
+
+  return (
+    <div className="mt-3 flex flex-col gap-2" data-testid="wake-tester">
+      <div className="flex items-center gap-2">
+        {!active ? (
+          <Button
+            onClick={onTest}
+            size="md"
+            disabled={!phraseValid}
+            data-testid="wake-test-button"
+          >
+            <Play className="mr-1 h-4 w-4" />
+            Testar agora
+          </Button>
+        ) : (
+          <Button
+            onClick={onStop}
+            size="md"
+            variant="secondary"
+            data-testid="wake-test-stop"
+          >
+            Parar
+          </Button>
+        )}
+        <span className="text-xs text-zinc-400" data-testid="wake-test-status">
+          {event.type === 'idle' && 'Pronto a testar.'}
+          {event.type === 'starting' && 'A iniciar o detector…'}
+          {event.type === 'ready' && 'À escuta — fala agora!'}
+          {event.type === 'wake' && '✅ Detectei!'}
+          {event.type === 'done' && '⌛ Tempo esgotado. Volta a clicar.'}
+        </span>
+      </div>
+      {props.mode === 'phrase' && transcript && (
+        <p className="font-mono text-[11px] text-zinc-500" data-testid="wake-test-transcript">
+          ouvi: &ldquo;{transcript}&rdquo;
+        </p>
+      )}
+      {event.type === 'wake' && event.text && (
+        <p className="font-mono text-[11px] text-emerald-400">{event.text}</p>
+      )}
+      {error && <CommandHint message={error} variant="error" />}
     </div>
   );
 }
