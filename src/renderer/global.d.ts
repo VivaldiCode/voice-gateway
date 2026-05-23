@@ -63,6 +63,7 @@ interface VgApi {
     onError: (cb: (m: { code: string; message: string }) => void) => () => void;
     onWarning: (cb: (m: { code: string; message: string }) => void) => () => void;
     onConnection: (cb: (m: { status: string; latencyMs: number | null; lastError: string | null }) => void) => () => void;
+    getConnection: () => Promise<{ status: string; latencyMs: number | null; lastError: string | null }>;
     onHotkey: (cb: (phase: 'press' | 'release') => void) => () => void;
     pttPress: () => void;
     pttRelease: () => void;

@@ -16,6 +16,11 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     actionTimeout: 10_000,
-    trace: 'on-first-retry',
+    // `on-first-retry` is useless on the local run (retries: 0). Keep traces
+    // and screenshots for any failure so we have actionable diagnostics out
+    // of the box.
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
 });

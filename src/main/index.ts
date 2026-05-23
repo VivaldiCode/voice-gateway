@@ -85,9 +85,12 @@ function openSettingsWindow(): void {
   });
   win.once('ready-to-show', () => {
     win.show();
-    // Mirror current STT/TTS status so the panel doesn't have to re-fetch.
+    // Mirror current STT/TTS/connection status so the panel doesn't have to
+    // re-fetch and the connection indicator doesn't sit on "Sem ligação"
+    // for up to 15 s waiting for the next heartbeat.
     win.webContents.send(IPC.STT_STATUS, sttStatus);
     win.webContents.send(IPC.TTS_STATUS, ttsStatus);
+    win.webContents.send(IPC.CONNECTION_STATUS, lastConnectionInfo);
   });
   win.on('closed', () => {
     if (settingsWindow === win) settingsWindow = null;
@@ -148,6 +151,15 @@ type SttStatus = PrepareStatus<SttProgress>;
 type TtsStatus = PrepareStatus<TtsProgressEvent>;
 let sttStatus: SttStatus = { state: 'idle' };
 let ttsStatus: TtsStatus = { state: 'idle' };
+// Last connection status we broadcast — replayed on every new BrowserWindow
+// ready-to-show so a renderer that mounted AFTER the WS already connected
+// doesn't miss the welcome event and stay "Sem ligação" until the next
+// heartbeat (which is up to 15 s away).
+let lastConnectionInfo: { status: string; latencyMs: number | null; lastError: string | null } = {
+  status: 'disconnected',
+  latencyMs: null,
+  lastError: null,
+};
 
 function send(channel: string, payload: unknown): void {
   // Broadcast to every open BrowserWindow so the separate Settings window
@@ -227,7 +239,24 @@ function bootstrapConversation(): void {
   // autoInstall: true so a fresh macOS install can self-bootstrap whisper.cpp
   // and piper-tts via Homebrew on first use, without bouncing the user back
   // to a terminal.
-  const stt = createSttAdapter(s.stt, { autoInstall: true });
+  const fakeTranscript = process.env['VG_E2E_FAKE_TRANSCRIPT'];
+  const stt = fakeTranscript
+    ? // Test-only path: skip real STT, always return the env var as the
+      // transcript. Lets the conversation-flows E2Es exercise the orchestrator
+      // without depending on whisper-cli being installed.
+      ({
+        id: 'e2e_fake_stt',
+        async isReady() {
+          return true;
+        },
+        async prepare() {
+          return;
+        },
+        async transcribe() {
+          return { text: fakeTranscript, durationMs: 1 };
+        },
+      } satisfies SttAdapter)
+    : createSttAdapter(s.stt, { autoInstall: true });
   activeStt = stt;
   const tts = createTtsAdapter(s.tts, { autoInstall: true });
   activeTts = tts;
@@ -236,7 +265,8 @@ function bootstrapConversation(): void {
   void prepareTts(tts);
 
   client.on('status', (status, info) => {
-    send(IPC.CONNECTION_STATUS, { status, ...info });
+    lastConnectionInfo = { status, ...info };
+    send(IPC.CONNECTION_STATUS, lastConnectionInfo);
   });
 
   orchestrator.on('state', (ctx) => send(IPC.CONV_STATE, ctx));
@@ -466,10 +496,12 @@ function createMainWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => {
     win.show();
-    // Resend the current STT + TTS status to the freshly-loaded renderer so
-    // it never starts with a stale "preparing…" UI on second window opens.
+    // Resend the current STT + TTS + connection status to the freshly-loaded
+    // renderer so it never starts with a stale "preparing…" or "Sem ligação"
+    // UI when the WS was already connected before this window mounted.
     send(IPC.STT_STATUS, sttStatus);
     send(IPC.TTS_STATUS, ttsStatus);
+    send(IPC.CONNECTION_STATUS, lastConnectionInfo);
   });
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
@@ -492,6 +524,8 @@ ipcMain.on(IPC.CONV_AUDIO_FRAME, (_e, frame: ArrayBuffer | Uint8Array) =>
 ipcMain.on(IPC.CONV_CANCEL, () => orchestrator?.cancel());
 ipcMain.on(IPC.CONV_BARGE_IN, () => orchestrator?.bargeIn());
 ipcMain.on(IPC.CONV_RESET, () => orchestrator?.reset());
+
+ipcMain.handle(IPC.CONNECTION_STATUS_GET, async () => lastConnectionInfo);
 
 ipcMain.handle(
   IPC.WAKE_TEST_START,

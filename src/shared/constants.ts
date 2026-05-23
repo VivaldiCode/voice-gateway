@@ -54,6 +54,9 @@ export const IPC = {
   PAIR_TEST: 'vg:pair:test',
   PAIR_SAVE: 'vg:pair:save',
   CONNECTION_STATUS: 'vg:connection:status',
+  /** Sync getter — the renderer asks for the current snapshot on mount so it
+   *  doesn't have to wait up to 15 s for the next heartbeat-driven event. */
+  CONNECTION_STATUS_GET: 'vg:connection:status:get',
   CONVERSATION_EVENT: 'vg:conversation:event',
   CONVERSATION_COMMAND: 'vg:conversation:command',
   AUDIO_DEVICES_LIST: 'vg:audio:devices',

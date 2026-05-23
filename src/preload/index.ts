@@ -45,6 +45,10 @@ const api = {
     onWarning: (cb: (m: { code: string; message: string }) => void): (() => void) => on(IPC.CONV_WARNING, cb),
     onConnection: (cb: (m: { status: string; latencyMs: number | null; lastError: string | null }) => void): (() => void) =>
       on(IPC.CONNECTION_STATUS, cb),
+    /** Pull the current snapshot — useful on mount so we don't have to wait
+     *  up to 15 s for the next heartbeat-driven `onConnection` event. */
+    getConnection: (): Promise<{ status: string; latencyMs: number | null; lastError: string | null }> =>
+      ipcRenderer.invoke(IPC.CONNECTION_STATUS_GET),
     onHotkey: (cb: (phase: 'press' | 'release') => void): (() => void) => on(IPC.HOTKEY_TRIGGER, cb),
     pttPress: (): void => ipcRenderer.send(IPC.CONV_PTT_PRESS),
     pttRelease: (): void => ipcRenderer.send(IPC.CONV_PTT_RELEASE),

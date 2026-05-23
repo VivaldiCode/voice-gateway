@@ -116,6 +116,16 @@ export function useConversation(): ConversationApi {
         lastError: m.lastError,
       });
     });
+    // Pull the current snapshot immediately. Without this we wait up to one
+    // ping interval (15 s) for the next heartbeat event if the WS already
+    // connected before this hook mounted.
+    void window.vg.conversation.getConnection().then((m) => {
+      setConnection({
+        status: m.status as ConnectionDisplay['status'],
+        latencyMs: m.latencyMs,
+        lastError: m.lastError,
+      });
+    });
     const offHotkey = window.vg.conversation.onHotkey(() => {
       // The main process drives the FSM transitions; we just react to state.
     });
