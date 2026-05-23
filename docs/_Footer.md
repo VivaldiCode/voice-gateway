@@ -1,1 +1,1 @@
-_Voice Gateway — [VivaldiCode/voice-gateway](https://github.com/VivaldiCode/voice-gateway). MIT licensed._
+_Voice Gateway — [VivaldiCode/voice-gateway](https://github.com/VivaldiCode/voice-gateway). MIT licensed. Wiki sources live under [`docs/`](https://github.com/VivaldiCode/voice-gateway/tree/main/docs); run `./docs/sync-wiki.sh` to publish._
