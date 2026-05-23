@@ -51,15 +51,19 @@ export function useConversation(): ConversationApi {
   const [sttStatus, setSttStatus] = useState<SttStatus>({ state: 'idle' });
   const [level, setLevel] = useState(0);
   const [inputDeviceId, setInputDeviceId] = useState<string | null>(null);
+  const [outputDeviceId, setOutputDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void window.vg.settings.get().then((s) => {
-      if (!cancelled) setInputDeviceId(s.audio.inputDeviceId ?? null);
+      if (cancelled) return;
+      setInputDeviceId(s.audio.inputDeviceId ?? null);
+      setOutputDeviceId(s.audio.outputDeviceId ?? null);
     });
-    const off = window.vg.settings.onChange((s) =>
-      setInputDeviceId(s.audio.inputDeviceId ?? null),
-    );
+    const off = window.vg.settings.onChange((s) => {
+      setInputDeviceId(s.audio.inputDeviceId ?? null);
+      setOutputDeviceId(s.audio.outputDeviceId ?? null);
+    });
     return () => {
       cancelled = true;
       off();
@@ -67,6 +71,12 @@ export function useConversation(): ConversationApi {
   }, []);
 
   const playback = useMemo(() => new AudioPlayback(), []);
+
+  // Push the user-chosen output device into the playback layer whenever it
+  // changes. Idempotent — repeated calls with the same id are cheap.
+  useEffect(() => {
+    playback.setOutputDevice(outputDeviceId);
+  }, [playback, outputDeviceId]);
 
   useEffect(() => {
     const offState = window.vg.conversation.onState((s) => {

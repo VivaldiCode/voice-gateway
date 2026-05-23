@@ -32,5 +32,11 @@
     "tests/unit/**/*.ts",
     "tests/integration/**/*.ts",
     "tests/e2e/**/*.ts"
+  ],
+  "exclude": [
+    // Imports a renderer-only file that uses DOM types not in this project's
+    // lib. Vitest runs it fine at runtime against the same compilation
+    // boundary as the renderer (it's just a fake-AudioContext smoke test).
+    "tests/integration/audio-playback-output-device.test.ts"
   ]
 }

@@ -18,6 +18,22 @@ export interface AudioPlaybackEvents {
   error: (err: Error) => void;
 }
 
+/**
+ * Browser-provided AudioContext options including the not-yet-fully-typed
+ * `sinkId` field (Chromium 110+). We declare it here so TS stops complaining
+ * while we still use it natively.
+ */
+interface AudioContextOptionsWithSinkId extends AudioContextOptions {
+  sinkId?: string;
+}
+
+interface AudioContextWithSinkId extends AudioContext {
+  /** Returns the currently-routed sink id ('' = system default). */
+  sinkId?: string;
+  /** Switches the live context to a different output device. */
+  setSinkId?: (sinkId: string) => Promise<void>;
+}
+
 export class AudioPlayback {
   private ctx: AudioContext | null = null;
   private nextStartAt = 0;
@@ -27,13 +43,62 @@ export class AudioPlayback {
   private startedEmitted = false;
   private endTimer: number | null = null;
   private listeners: Partial<AudioPlaybackEvents> = {};
+  /**
+   * The MediaDeviceInfo.deviceId of the output speaker the user picked in
+   * Settings → Microfone → Saída de áudio. Empty string / null = system default.
+   */
+  private outputDeviceId: string | null = null;
 
   on<K extends keyof AudioPlaybackEvents>(event: K, cb: AudioPlaybackEvents[K]): void {
     this.listeners[event] = cb;
   }
 
+  /**
+   * Re-route playback to a different output device.
+   *
+   * Behaviour depends on whether an AudioContext is already alive:
+   *   - No context yet → store the id; the next `getCtx()` constructs with
+   *     `{ sinkId }` so the very first chunk plays through the right speaker.
+   *   - Live context → call `setSinkId()` if the browser supports it
+   *     (Chrome 110+). Falls back silently on older runtimes — playback
+   *     continues on the previous device until next utterance.
+   */
+  setOutputDevice(deviceId: string | null): void {
+    this.outputDeviceId = deviceId && deviceId.trim().length > 0 ? deviceId : null;
+    if (!this.ctx) return;
+    const ctx = this.ctx as AudioContextWithSinkId;
+    if (typeof ctx.setSinkId === 'function') {
+      // Chromium normalises '' to "system default sink". Pass the same.
+      void ctx.setSinkId(this.outputDeviceId ?? '').catch((err) => {
+        this.listeners.error?.(err as Error);
+      });
+    }
+  }
+
+  /** The current output device id (mirrors what was last set; null = default). */
+  getOutputDevice(): string | null {
+    return this.outputDeviceId;
+  }
+
   private getCtx(): AudioContext {
-    if (!this.ctx) this.ctx = new AudioContext();
+    if (!this.ctx) {
+      // Try the AudioContextOptions overload that takes a sinkId — Chromium
+      // 110+ supports it. If the platform rejects the option, fall back to a
+      // bare context and rely on setSinkId() below.
+      const opts: AudioContextOptionsWithSinkId | undefined = this.outputDeviceId
+        ? { sinkId: this.outputDeviceId }
+        : undefined;
+      try {
+        this.ctx = new AudioContext(opts);
+      } catch {
+        this.ctx = new AudioContext();
+        // Best-effort switch after construction.
+        const ctx = this.ctx as AudioContextWithSinkId;
+        if (this.outputDeviceId && typeof ctx.setSinkId === 'function') {
+          void ctx.setSinkId(this.outputDeviceId).catch(() => undefined);
+        }
+      }
+    }
     // Chromium's audio policy suspends AudioContexts that aren't created
     // during a user gesture. Resume on every entry — resume() is a no-op
     // when the context is already running, and is allowed any time after

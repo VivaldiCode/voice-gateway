@@ -130,14 +130,19 @@ type MicStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unkno
 
 function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(
     settings.audio.inputDeviceId ?? null,
+  );
+  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(
+    settings.audio.outputDeviceId ?? null,
   );
   const [needsPermission, setNeedsPermission] = useState(false);
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [micStatus, setMicStatus] = useState<MicStatus>('unknown');
+  const [outputTestState, setOutputTestState] = useState<'idle' | 'playing'>('idle');
   // Hold the running test capture across renders.
   const captureRef = useMemo(() => ({ current: null as Awaited<ReturnType<typeof openCapture>> | null }), []);
 
@@ -156,7 +161,9 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
       }
       const all = await navigator.mediaDevices.enumerateDevices();
       const inputs = all.filter((d) => d.kind === 'audioinput');
+      const outputs = all.filter((d) => d.kind === 'audiooutput');
       setDevices(inputs);
+      setOutputDevices(outputs);
       setNeedsPermission(inputs.every((d) => !d.label));
       setError(null);
     } catch (err) {
@@ -197,6 +204,71 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
     },
     [settings.audio],
   );
+
+  const persistOutput = useCallback(
+    (id: string | null) => {
+      void window.vg.settings.set({
+        audio: { ...settings.audio, outputDeviceId: id },
+      });
+    },
+    [settings.audio],
+  );
+
+  /**
+   * Play a short test tone on the selected output device. Uses an inline
+   * AudioBufferSourceNode so we don't depend on a server round-trip or a
+   * TTS adapter being ready. Honours the live setSinkId() path.
+   */
+  const playOutputTest = useCallback(async (): Promise<void> => {
+    setOutputTestState('playing');
+    try {
+      const opts: { sinkId?: string } = selectedOutputId
+        ? { sinkId: selectedOutputId }
+        : {};
+      // Construct with sinkId so the very first sample plays on the right
+      // speaker — falling back to a bare AudioContext if the runtime rejects
+      // the option (older Chromium).
+      let ctx: AudioContext;
+      try {
+        ctx = new AudioContext(opts as AudioContextOptions);
+      } catch {
+        ctx = new AudioContext();
+        const ctxWithSink = ctx as unknown as {
+          setSinkId?: (id: string) => Promise<void>;
+        };
+        if (selectedOutputId && typeof ctxWithSink.setSinkId === 'function') {
+          try {
+            await ctxWithSink.setSinkId(selectedOutputId);
+          } catch {
+            // best-effort
+          }
+        }
+      }
+      const sampleRate = ctx.sampleRate;
+      const seconds = 0.6;
+      const buf = ctx.createBuffer(1, Math.floor(seconds * sampleRate), sampleRate);
+      const ch = buf.getChannelData(0);
+      // Soft 440 Hz tone with a tiny envelope so it doesn't click.
+      for (let i = 0; i < ch.length; i++) {
+        const t = i / sampleRate;
+        const env = Math.min(1, t * 20) * Math.min(1, (seconds - t) * 20);
+        ch[i] = Math.sin(2 * Math.PI * 440 * t) * 0.18 * env;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start();
+      await new Promise<void>((resolve) => {
+        src.onended = () => resolve();
+        window.setTimeout(resolve, (seconds + 0.3) * 1000);
+      });
+      void ctx.close();
+    } catch (err) {
+      setError(`Não consegui reproduzir o teste de saída: ${(err as Error).message}`);
+    } finally {
+      setOutputTestState('idle');
+    }
+  }, [selectedOutputId]);
 
   const startTest = useCallback(async () => {
     if (captureRef.current) return;
@@ -295,6 +367,61 @@ function MicrofoneTab({ settings }: { settings: Settings }): JSX.Element {
           >
             {error}
           </p>
+        )}
+      </Section>
+
+      <Section title="Saída de áudio (coluna)">
+        <p className="text-xs text-zinc-500">
+          Escolhe por onde queres ouvir a voz do agente. A mudança aplica-se
+          já — não é preciso reiniciar.
+        </p>
+        <div className="flex gap-2">
+          <select
+            value={selectedOutputId ?? ''}
+            onChange={(e) => {
+              const v = e.target.value || null;
+              setSelectedOutputId(v);
+              persistOutput(v);
+            }}
+            aria-label="Dispositivo de saída"
+            data-testid="output-device-select"
+            className="h-10 flex-1 rounded-xl border border-bg-subtle bg-bg px-2 text-sm text-white focus:border-accent focus:outline-none"
+          >
+            <option value="">Predefinido do sistema</option>
+            {outputDevices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Saída ${d.deviceId.slice(0, 6)}`}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => void refreshDevices()}
+            aria-label="Recarregar lista de saídas"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="md"
+            onClick={() => void playOutputTest()}
+            disabled={outputTestState === 'playing'}
+            data-testid="output-test-button"
+          >
+            <Play className="mr-1 h-4 w-4" />
+            {outputTestState === 'playing' ? 'A reproduzir…' : 'Testar saída'}
+          </Button>
+          <span className="text-xs text-zinc-500">
+            Um bipe curto (440&nbsp;Hz, ~0.6&nbsp;s) na saída escolhida.
+          </span>
+        </div>
+        {outputDevices.length === 0 && !needsPermission && (
+          <CommandHint
+            variant="info"
+            message="Não detectei saídas de áudio adicionais. Carrega o botão de recarregar depois de ligares colunas / auscultadores."
+          />
         )}
       </Section>
     </div>

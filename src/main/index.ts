@@ -324,7 +324,7 @@ async function rebuildWakeWord(): Promise<void> {
   const s = settings.get();
   if (s.activation.mode !== 'WAKE_WORD') return;
   if (!orchestrator) return;
-  wake = new WakeWordService();
+  wake = makeWakeService();
   const curr = wake;
   curr.on('wake', (info) => {
     log.info('[VG] wake detected:', info);
@@ -370,6 +370,24 @@ function stopTestWake(): void {
   testWake = null;
 }
 
+/**
+ * Build a WakeWordService for production OR — when `VG_WAKE_E2E_FAKE=1` is set
+ * in the environment — for the Playwright wake-word E2E. The E2E variant points
+ * the service at `fake_wake_runner.py` which emits deterministic JSON-line
+ * events without touching the mic or whisper. Kept in main so production code
+ * paths don't gain test-only branches.
+ */
+function makeWakeService(): WakeWordService {
+  if (process.env['VG_WAKE_E2E_FAKE'] === '1') {
+    const scriptPath = app.isPackaged
+      ? join(process.resourcesPath, 'python', 'fake_wake_runner.py')
+      : join(process.cwd(), 'resources', 'python', 'fake_wake_runner.py');
+    log.info('[VG] wake-word E2E fake runner active at', scriptPath);
+    return new WakeWordService({ scriptPath, autoInstall: false });
+  }
+  return new WakeWordService();
+}
+
 async function startTestWake(req: {
   mode: 'openww' | 'phrase';
   model?: string;
@@ -377,7 +395,7 @@ async function startTestWake(req: {
   language?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   stopTestWake();
-  const svc = new WakeWordService();
+  const svc = makeWakeService();
   testWake = svc;
   svc.on('ready', (info) =>
     send(IPC.WAKE_TEST_EVENT, { event: 'ready', ...info }),
