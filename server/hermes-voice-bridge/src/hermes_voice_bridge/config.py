@@ -11,7 +11,10 @@ Schema:
 
     [hermes]
     base_url = "http://localhost:8642"
-    request_timeout = 30
+    # Per-read timeout for the streaming response (aiohttp sock_read), in
+    # seconds. NOT a wall-clock cap — a long actively-streaming reply will
+    # keep flowing as long as bytes arrive within this gap.
+    request_timeout = 60
     # Optional — only needed if the Hermes API requires Bearer auth.
     # Omit / leave empty to call Hermes without an Authorization header.
     api_key = ""
@@ -52,7 +55,7 @@ class BridgeConfig:
             port=int(bridge.get("port", 8765)),
             token=str(token),
             hermes_base_url=str(hermes.get("base_url", "http://localhost:8642")),
-            hermes_request_timeout=int(hermes.get("request_timeout", 30)),
+            hermes_request_timeout=int(hermes.get("request_timeout", 60)),
             hermes_api_key=str(hermes.get("api_key", "")).strip(),
         )
 

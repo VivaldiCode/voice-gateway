@@ -240,6 +240,24 @@ export class ConversationOrchestrator extends EventEmitter {
       this.emit('tts_chunk', { data: payload, format: 'pcm16_22050', seq: header.seq }, header.turn_id);
     });
     this.client.on('response_end', () => {
+      // If local TTS is still synthesising the assistant's reply, defer the
+      // RESPONSE_END until the TTS 'end' event fires. Otherwise we race:
+      //
+      //   bridge sends response_text(final=true) and response_end back-to-back
+      //   ↓
+      //   orchestrator: dispatch RESPONSE_AUDIO_START → THINKING→SPEAKING
+      //   orchestrator: call this.speak(text) — Piper spawns asynchronously
+      //   orchestrator (next tick): dispatch RESPONSE_END → SPEAKING→IDLE
+      //   piper finally emits first PCM chunk → renderer sees state=IDLE
+      //                                          and never plays the audio.
+      //
+      // pendingTtsTurnId is set in speak() BEFORE awaiting tts.speak() and is
+      // cleared in onTtsEnd / onTtsError, so this guard accurately reflects
+      // "we still have an in-flight local TTS for this turn".
+      if (this.pendingTtsTurnId) {
+        log.debug('[VG] response_end received but local TTS still active — deferring FSM dispatch');
+        return;
+      }
       this.dispatch({ type: 'RESPONSE_END' });
     });
     this.client.on('error', (m) => {

@@ -365,7 +365,12 @@ token = "${EXISTING_TOKEN}"
 
 [hermes]
 base_url = "${HERMES_URL}"
-request_timeout = 30
+# Per-read timeout for the streaming chat-completions response (seconds).
+# Applied as aiohttp's `sock_read` — the max idle gap between bytes — not as
+# a wall-clock cap on the whole reply. A long, actively-streaming answer is
+# allowed to take as long as it needs; a stuck upstream still trips at this
+# value. Bump it if you see "UNKNOWN" errors mid-reply with a slow model.
+request_timeout = 60
 # Bearer token sent to the Hermes /v1/chat/completions endpoint.
 # Leave empty if your Hermes instance accepts unauthenticated requests.
 api_key = "${HERMES_API_KEY_ESC}"

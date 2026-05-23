@@ -73,7 +73,17 @@ class HermesAdapter:
         api_key: str = "",
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._timeout = aiohttp.ClientTimeout(total=request_timeout)
+        # `total` for streaming SSE chops the response off mid-stream as soon as
+        # request_timeout elapses, even when Hermes is still happily producing
+        # tokens. Use `sock_read` instead: the max gap between successive bytes.
+        # `connect` keeps the upstream-down failure mode fast. `total` is left
+        # as None so a long but actively-streaming reply is allowed to finish.
+        self._timeout = aiohttp.ClientTimeout(
+            total=None,
+            connect=10,
+            sock_connect=10,
+            sock_read=max(30, request_timeout),
+        )
         self._model = model
         self._api_key = api_key.strip()
         # session_id → deque of {"role": "...", "content": "..."} dicts.

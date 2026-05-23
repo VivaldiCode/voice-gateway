@@ -3,7 +3,11 @@
  *
  * Connects to `${VG_BRIDGE_URL}` with `${VG_BRIDGE_TOKEN}`, sends the
  * literal text "oi" as a final transcript, and asserts that at least one
- * non-empty `response_text` delta comes back. Times out at 30 s.
+ * non-empty `response_text` delta comes back. Default timeout is 90 s —
+ * cold-start Hermes builds can take ~30 s just to load the model, and the
+ * reply itself often streams for another 20–40 s on a long answer (see
+ * the screenshot in the issue tracker — the assistant volunteered ~80
+ * words before the original 30 s deadline expired).
  *
  * Skipped when those env vars aren't set so vitest stays green in CI / on
  * a fresh clone. To run against the user's deployment:
@@ -11,6 +15,10 @@
  *   VG_BRIDGE_URL=ws://10.0.19.1:8765/ws \
  *   VG_BRIDGE_TOKEN=kug4fJKR... \
  *   npm test -- tests/integration/bridge-text-roundtrip.test.ts
+ *
+ * For a very slow Hermes, override:
+ *   VG_BRIDGE_TIMEOUT_MS=180000 \
+ *     npm test -- tests/integration/bridge-text-roundtrip.test.ts
  *
  * If the assistant comes back empty, the chat-completions stream parsing
  * (or Hermes' own response) is the suspect — *not* the desktop audio
@@ -31,7 +39,7 @@ import {
 
 const BRIDGE_URL = process.env['VG_BRIDGE_URL'];
 const BRIDGE_TOKEN = process.env['VG_BRIDGE_TOKEN'];
-const TIMEOUT_MS = Number(process.env['VG_BRIDGE_TIMEOUT_MS'] ?? 30_000);
+const TIMEOUT_MS = Number(process.env['VG_BRIDGE_TIMEOUT_MS'] ?? 90_000);
 
 const live = BRIDGE_URL && BRIDGE_TOKEN ? describe : describe.skip;
 
@@ -108,7 +116,17 @@ export async function sendTextTurn(opts: {
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`bridge round-trip timed out after ${timeoutMs} ms — trace: ${result.trace.join(', ')}`));
+      const tail =
+        result.deltaCount > 0
+          ? ` — got ${result.deltaCount} delta(s) totalling ${result.totalChars} chars before timeout (stream was making progress; bump VG_BRIDGE_TIMEOUT_MS)`
+          : result.thinking
+            ? ' — bridge sent "thinking" but never produced any response_text. Check journalctl -fu hermes-voice-bridge on the server: Hermes is probably slow on cold start, or returning 200 with an empty body.'
+            : ' — never advanced past welcome. Bridge or transport issue.';
+      reject(
+        new Error(
+          `bridge round-trip timed out after ${timeoutMs} ms — trace: ${result.trace.join(', ')}${tail}`,
+        ),
+      );
     }, timeoutMs);
 
     ws.on('open', () => {

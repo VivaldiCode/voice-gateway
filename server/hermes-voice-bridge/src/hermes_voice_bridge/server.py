@@ -165,9 +165,14 @@ async def _run_turn(
         if not ws.closed:
             await send_error(ws, "HERMES_UPSTREAM", str(err), turn_id=turn_id)
     except Exception as err:  # pragma: no cover - safety net
+        # Some exceptions (aiohttp.ServerDisconnectedError, asyncio.CancelledError)
+        # carry no useful str(). Always include the type so the desktop log shows
+        # something actionable instead of an empty "UNKNOWN" toast.
         log.exception("turn failed")
         if not ws.closed:
-            await send_error(ws, "UNKNOWN", str(err), turn_id=turn_id)
+            tail = str(err).strip()
+            detail = f"{type(err).__name__}: {tail}" if tail else type(err).__name__
+            await send_error(ws, "UNKNOWN", detail, turn_id=turn_id)
 
 
 async def send_error(

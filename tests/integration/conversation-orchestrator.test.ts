@@ -159,6 +159,41 @@ describe('ConversationOrchestrator', () => {
     void stt; // referenced via fake; keep lint happy
   });
 
+  it('defers RESPONSE_END from server while local TTS is still active', async () => {
+    // Regression test for the audio-never-plays bug. The bridge sends
+    // response_text(final=true) and response_end back-to-back. Without the
+    // deferral, the FSM would leave SPEAKING before the first TTS chunk
+    // reached the renderer, batching away the SPEAKING state and skipping
+    // playback entirely.
+    const { o, client, tts } = makeOrchestrator();
+    tts.autoFinish = false; // simulate Piper still spawning
+
+    o.pttPress();
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    (client as unknown as EventEmitter).emit('response_text', {
+      type: 'response_text',
+      turn_id: 'turn-1',
+      text: 'olá!',
+      final: true,
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(o.getState().state).toBe('SPEAKING');
+
+    // Server's response_end arrives while TTS is still pending — must be a no-op.
+    (client as unknown as EventEmitter).emit('response_end', {
+      type: 'response_end',
+      turn_id: 'turn-1',
+    });
+    expect(o.getState().state).toBe('SPEAKING');
+
+    // When the local TTS finally emits 'end', the FSM should advance.
+    tts.emit('end');
+    expect(o.getState().state).toBe('IDLE');
+  });
+
   it('routes server-side audio chunks straight to tts_chunk', async () => {
     const { o, client } = makeOrchestrator();
     const ttsChunks: TtsChunk[] = [];
