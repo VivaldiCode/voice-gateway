@@ -11,7 +11,11 @@ export default defineConfig({
   testIgnore: '**/._*',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // 1 retry locally — the 28-spec suite back-to-back races on Piper
+  // venv-auto-install and Whisper warmup under load. CI gets 2 retries.
+  // Individual specs are deterministic (isolation passes), so retries here
+  // mask resource pressure, not real flakiness.
+  retries: process.env.CI ? 2 : 1,
   workers: 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {

@@ -379,3 +379,55 @@ export async function sttReady(page: Page): Promise<{ ok: boolean; message?: str
     return await w.vg.stt.prepare();
   });
 }
+
+/**
+ * Press the call button, hold for `ms` milliseconds, release. The pointer
+ * event pair is what the CallButton component listens for (not click). Used
+ * by every conversation-flow spec.
+ */
+export async function holdPtt(page: Page, ms: number): Promise<void> {
+  const btn = page.getByTestId('call-button');
+  await btn.dispatchEvent('pointerdown');
+  await page.waitForTimeout(ms);
+  await btn.dispatchEvent('pointerup');
+}
+
+/**
+ * Wait until the last `state` event recorded by `instrumentTtsCounter`
+ * matches one of the given states. Returns the matching state. Throws if
+ * the timeout expires without a match — surfaces what we DID see for
+ * actionable diagnostics.
+ */
+export async function waitForState(
+  page: Page,
+  desired: ReadonlyArray<string>,
+  opts: { timeoutMs?: number } = {},
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const desiredSet = new Set(desired);
+  const start = Date.now();
+  let last: string = '';
+  while (Date.now() - start < timeoutMs) {
+    const stats = await readVgStats(page);
+    last = stats.stateLog.at(-1)?.state ?? '';
+    if (desiredSet.has(last)) return last;
+    await page.waitForTimeout(100);
+  }
+  const recent = (await readVgStats(page)).stateLog
+    .slice(-10)
+    .map((s) => s.state)
+    .join(' → ');
+  throw new Error(
+    `waitForState timed out after ${timeoutMs} ms — wanted [${desired.join(', ')}], last=${last}, recent=${recent}`,
+  );
+}
+
+/**
+ * Trigger a wake event on the **fake** wake runner. Only valid when the app
+ * was launched with `VG_WAKE_E2E_FAKE=1` and `activation.mode === 'WAKE_WORD'`.
+ * The fake runner emits its wake autonomously after ~1.5 s — this helper
+ * just waits for the FSM to land in CAPTURING.
+ */
+export async function waitForWake(page: Page, timeoutMs = 5_000): Promise<void> {
+  await waitForState(page, ['CAPTURING'], { timeoutMs });
+}

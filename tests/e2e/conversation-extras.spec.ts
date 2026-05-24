@@ -19,7 +19,7 @@
  *   #37 — Settings → Avançado → factory reset wipes the pairing and the
  *         schema-versioned fields, returning the user to the wizard.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,11 +35,13 @@ import {
 } from './helpers/mock-bridge-presets';
 import {
   FIXTURES_DIR,
+  holdPtt,
   instrumentTtsCounter,
   launchPackaged,
   openSettingsWindow,
   packagedAppExists,
   readVgStats,
+  waitForState,
   writeSeedSettings,
   PACKAGED_EXEC,
   type TestRig,
@@ -47,13 +49,6 @@ import {
 import { _electron as electron } from '@playwright/test';
 
 const FAKE_AUDIO = join(FIXTURES_DIR, 'hi-how-are-you.wav');
-
-async function holdPtt(page: Page, ms: number): Promise<void> {
-  const btn = page.getByTestId('call-button');
-  await btn.dispatchEvent('pointerdown');
-  await page.waitForTimeout(ms);
-  await btn.dispatchEvent('pointerup');
-}
 
 test.describe('conversation extras', () => {
   let rig: TestRig | null = null;
@@ -93,13 +88,7 @@ test.describe('conversation extras', () => {
 
     // Press PTT, give it time to actually enter CAPTURING.
     await mainWindow.getByTestId('call-button').dispatchEvent('pointerdown');
-    await expect
-      .poll(
-        async () =>
-          (await readVgStats(mainWindow)).stateLog.at(-1)?.state ?? '',
-        { timeout: 5_000 },
-      )
-      .toBe('CAPTURING');
+    await waitForState(mainWindow, ['CAPTURING'], { timeoutMs: 5_000 });
 
     // Fire the explicit cancel IPC (the same one the renderer exposes via
     // a future "Cancel" button — for now exercised via window.vg).
@@ -111,13 +100,7 @@ test.describe('conversation extras', () => {
     });
 
     // FSM goes back to IDLE (rest state). transcribe() was never called.
-    await expect
-      .poll(
-        async () =>
-          (await readVgStats(mainWindow)).stateLog.at(-1)?.state ?? '',
-        { timeout: 5_000 },
-      )
-      .toBe('IDLE');
+    await waitForState(mainWindow, ['IDLE'], { timeoutMs: 5_000 });
 
     await mainWindow.waitForTimeout(500);
     expect(transcripts).toHaveLength(0);

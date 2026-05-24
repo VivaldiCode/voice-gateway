@@ -229,13 +229,51 @@ worklet, which is loaded via `URL.createObjectURL(new Blob([source]))`
 `'unsafe-inline'` on `style-src` is needed because Tailwind's runtime
 adds inline `<style>` tags.
 
+## Stable visual test IDs
+
+The E2E suite leans on a small set of `data-testid` attributes that
+the renderer treats as **public contract**. Don't rename them without
+updating the matching Playwright assertions — the suite (28 specs)
+will fail loud.
+
+| Test ID                       | Component        | What it surfaces                                   |
+|-------------------------------|------------------|----------------------------------------------------|
+| `call-button`                 | `CallButton`     | The PTT button; pointer events drive press/release |
+| `state-orb`                   | `StateOrb`       | Wrapper div. Also carries `data-state="…"` (the live FSM state) for visual assertions |
+| `transcript`                  | `TranscriptView` | The scroller container                             |
+| `transcript-user` / `transcript-assistant` | (rows in TranscriptView) | One per turn; lets specs assert ordering + text |
+| `connection-indicator`        | `MainScreen`     | "Ligado (N ms)" / "A ligar…" / "Sem ligação"       |
+| `warning-toast` / `error-toast` | `MainScreen`   | The `CommandHint` banners. `warning-toast` auto-dismisses after 4 s |
+| `tab-microfone` / `tab-voz` / `tab-ativacao` / `tab-avancado` etc. | `SettingsPanel` | One per tab in the Settings window |
+| `mic-permission`              | `SettingsPanel`  | Carries `data-status="granted|denied|…"` for the macOS TCC pill |
+| `mic-start-test` / `mic-stop-test` / `vu-meter` | Microfone tab | Live VU meter test ride |
+| `output-device-select` / `output-test-button` | Microfone tab | Speaker picker + 440 Hz tone test |
+| `tts-test-text` / `tts-test-button` / `tts-test-reset` / `tts-test-char-count` | Voz tab | Custom-text voice tester |
+| `wake-phrase-input` / `wake-phrase-hint`     | Ativação tab     | Phrase mode input + validation hint |
+| `wake-test-button` / `wake-test-stop` / `wake-test-status` / `wake-test-transcript` / `wake-tester` | Ativação tab | "Testar agora" panel for wake detection |
+| `factory-reset` / `factory-reset-confirm`    | Avançado tab     | Two-step danger button |
+| `url-next` / `token-next` / `probe-test` / `probe-result` / `finish-pairing` / `pairing-done` / `open-app` | `PairingWizard` | Step navigation + connection probe in the wizard |
+
+### `state-orb`'s `data-state` attribute
+
+In addition to the test ID, `StateOrb` exposes the **live FSM state**
+as `data-state="IDLE" | "LISTENING_WAKE" | "CAPTURING" | "STREAMING" | "THINKING" | "SPEAKING" | "ERROR"`.
+This is the visual contract for any styling test that wants to assert
+"the orb turned green during capture" without screenshot comparison.
+
+Note: the attribute reflects whatever the React tree re-rendered to,
+which can race past STREAMING/THINKING faster than a 50 ms poll. If
+you want to assert every transition was visited, read
+`window.__vg_state_log` (populated by the rig's
+`instrumentTtsCounter`) — that's event-driven and never misses.
+
 ## Testing
 
 UI is exercised by Playwright at
 [`tests/e2e/`](https://github.com/VivaldiCode/voice-gateway/tree/main/tests/e2e)
 (launches the packaged app, drives the pairing wizard, presses the
 call button, asserts the FSM state transitions). See
-[[Testing-Guide#e2e-playwright]] for the full setup.
+[[Testing-Guide#the-e2e-rig]] for the full setup.
 
 Component unit tests live next to their components when sane (small
 pure components like `Logo`, `Button`) and otherwise are folded into

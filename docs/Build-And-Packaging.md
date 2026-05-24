@@ -216,6 +216,19 @@ A future GitHub Actions matrix would just add `macos-latest`,
 | `Library not loaded: @rpath/Electron Framework`          | A helper wasn't re-signed. The hook walks Frameworks/; if you added new helpers, re-check. |
 | Renderer blank after install                             | Vite's renderer outDir doesn't match `loadFile` path. The pattern is `out/renderer/index.html` → `join(__dirname, '../renderer/index.html')`. |
 | Microphone permission lost across rebuilds               | Ad-hoc signing failed silently; check the `[after-pack]` codesign output for "main signature: <stuff>". |
+| `hdiutil: create failed - No space left on device`       | The default `electron-builder` DMG path stages its temp file in `/private/var/folders/...` — i.e. on the system volume. If that volume is low on free space, `hdiutil` aborts even though the source bundle is small. **Workaround:** run `hdiutil create` manually with `TMPDIR` pointed at a roomier volume (typically the same drive that holds the source tree). The output DMG is identical for the end user; only the staging directory differs. |
+
+Manual DMG when `/var/folders` is full:
+
+```bash
+TMPDIR=/Volumes/External\ 01/.tmp \
+  hdiutil create \
+    -srcfolder "release/mac-arm64/Voice Gateway.app" \
+    -volname "Voice Gateway 0.1.0-arm64" \
+    -anyowners -nospotlight \
+    -format UDZO -fs HFS+ \
+    "release/Voice Gateway-0.1.0-arm64.dmg"
+```
 
 Run `npm run build:mac --verbose` to see the full electron-builder log
 plus our afterPack output.

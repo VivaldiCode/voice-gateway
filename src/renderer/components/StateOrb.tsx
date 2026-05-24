@@ -38,7 +38,12 @@ export function StateOrb({ state, level = 0 }: StateOrbProps): JSX.Element {
   const haloOpacity = capturing ? Math.min(0.9, 0.25 + level * 4) : 0.0;
 
   return (
-    <div className="flex flex-col items-center gap-4" aria-live="polite">
+    <div
+      className="flex flex-col items-center gap-4"
+      aria-live="polite"
+      data-testid="state-orb"
+      data-state={state}
+    >
       <div className="relative flex h-40 w-40 items-center justify-center">
         {/* Pulsing halo driven by mic RMS */}
         {capturing && (

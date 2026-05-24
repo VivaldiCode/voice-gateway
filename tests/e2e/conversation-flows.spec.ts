@@ -14,7 +14,7 @@
  * adapter; when it's set, it builds a tiny in-process fake that always
  * returns the value of the var as the transcript.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import {
   MOCK_DEFAULT_TOKEN,
   startMockBridge,
@@ -24,23 +24,18 @@ import type { ServerMessage } from '../../src/shared/protocol';
 import { join } from 'node:path';
 import {
   FIXTURES_DIR,
+  holdPtt,
   instrumentTtsCounter,
   launchPackaged,
   packagedAppExists,
   readVgStats,
+  waitForState,
   type TestRig,
 } from './helpers/rig';
 
 const FAKE_AUDIO = join(FIXTURES_DIR, 'hi-how-are-you.wav');
 
 const FAKE_TRANSCRIPT = 'olá hermes responde sff';
-
-async function holdPtt(page: Page, ms: number): Promise<void> {
-  const btn = page.getByTestId('call-button');
-  await btn.dispatchEvent('pointerdown');
-  await page.waitForTimeout(ms);
-  await btn.dispatchEvent('pointerup');
-}
 
 test.describe('conversation flows — packaged app', () => {
   let rig: TestRig | null = null;
@@ -96,13 +91,7 @@ test.describe('conversation flows — packaged app', () => {
     expect(bridgeTranscripts).toBe(0);
 
     // App must return to IDLE — no stuck SPEAKING / THINKING.
-    await expect
-      .poll(
-        async () =>
-          (await readVgStats(mainWindow)).stateLog.at(-1)?.state ?? '',
-        { timeout: 5_000 },
-      )
-      .toBe('IDLE');
+    await waitForState(mainWindow, ['IDLE'], { timeoutMs: 5_000 });
   });
 
   // ───── #20: barge-in mid-utterance
@@ -214,26 +203,14 @@ test.describe('conversation flows — packaged app', () => {
 
     // Turn 1: press → release → expect ERROR.
     await holdPtt(mainWindow, 200);
-    await expect
-      .poll(
-        async () =>
-          (await readVgStats(mainWindow)).stateLog.at(-1)?.state ?? '',
-        { timeout: 10_000 },
-      )
-      .toBe('ERROR');
+    await waitForState(mainWindow, ['ERROR'], { timeoutMs: 10_000 });
 
     const errs = (await readVgStats(mainWindow)).errors;
     expect(errs.join('|')).toMatch(/HERMES_UPSTREAM|simulated/i);
 
     // Auto-recovery: a single PTT click from ERROR jumps to CAPTURING.
     await mainWindow.getByTestId('call-button').dispatchEvent('pointerdown');
-    await expect
-      .poll(
-        async () =>
-          (await readVgStats(mainWindow)).stateLog.at(-1)?.state ?? '',
-        { timeout: 3_000 },
-      )
-      .toBe('CAPTURING');
+    await waitForState(mainWindow, ['CAPTURING'], { timeoutMs: 3_000 });
     await mainWindow.getByTestId('call-button').dispatchEvent('pointerup');
   });
 

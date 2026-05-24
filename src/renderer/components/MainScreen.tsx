@@ -74,8 +74,16 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         />
         <TranscriptView lines={conv.transcript.slice(-10)} />
         <SttStatusBanner status={conv.sttStatus} />
-        {conv.warning && <CommandHint message={conv.warning} variant="warning" />}
-        {conv.error && <CommandHint message={conv.error} variant="error" />}
+        {conv.warning && (
+          <div data-testid="warning-toast">
+            <CommandHint message={conv.warning} variant="warning" />
+          </div>
+        )}
+        {conv.error && (
+          <div data-testid="error-toast">
+            <CommandHint message={conv.error} variant="error" />
+          </div>
+        )}
       </main>
     </div>
   );

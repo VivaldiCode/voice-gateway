@@ -374,24 +374,41 @@ afconvert /tmp/x.aiff -d LEI16 -c 1 -r 16000 -f WAVE tests/e2e/fixtures/hi-how-a
 
 Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 
-### What the suite currently covers (22 specs)
+### What the suite currently covers (28 specs)
 
 ```
 tests/e2e/
-├── audio-conversation.spec.ts   real-audio full turn (fake mic → whisper → bridge → Piper)
-├── connection.spec.ts           WS reconnect on bridge bounce, wizard URL validation
-├── conversation-extras.spec.ts  cancel, settings persistence, provider swap,
-│                                server-side audio, factory reset (5 cases)
-├── conversation-flows.spec.ts   short tap, barge-in, error recovery, multi-turn,
-│                                settings broadcast (5 cases)
-├── mic-capture.spec.ts          getUserMedia probe, real-mic RMS
-├── pairing.spec.ts              wizard happy path, friendly error on bad token
-├── settings-audio.spec.ts       speaker selector, custom-text TTS test
-└── wake-word.spec.ts            openww + phrase + tester-reset (fake runner)
+├── audio-conversation.spec.ts    real-audio full turn (fake mic → whisper → bridge → Piper)
+├── connection.spec.ts            WS reconnect on bridge bounce, wizard URL validation
+├── conversation-advanced.spec.ts wake→full turn, MP3 server audio,
+│                                 transcript rendering, re-pair mid-session (4)
+├── conversation-extras.spec.ts   cancel, settings persistence, provider swap,
+│                                 server PCM audio, factory reset (5)
+├── conversation-flows.spec.ts    short tap, barge-in, error recovery, multi-turn,
+│                                 settings broadcast (5)
+├── mic-capture.spec.ts           getUserMedia probe, real-mic RMS
+├── pairing.spec.ts               wizard happy path, friendly error on bad token
+├── settings-audio.spec.ts        speaker selector, custom-text TTS test
+├── visual-states.spec.ts         warning toast lifecycle, StateOrb data-state attr (2)
+└── wake-word.spec.ts             openww + phrase + tester-reset (fake runner)
 ```
 
-22 specs × ~3 s each (most are <2 s; the real-audio one is ~20 s)
-totals ~1.5 minutes for a full local run.
+28 specs totalling ~2 minutes for a full local run (the real-audio one
+is the only slow case; everything else is <3 s each thanks to the fake
+STT / fake wake runner / mock bridge stack).
+
+### Shared spec helpers
+
+[`tests/e2e/helpers/rig.ts`](https://github.com/VivaldiCode/voice-gateway/blob/main/tests/e2e/helpers/rig.ts)
+ships these in addition to launch helpers:
+
+| Helper                   | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `holdPtt(page, ms)`      | Press → hold → release the call button via pointer events.     |
+| `waitForState(page, [s])`| Poll `__vg_state_log` for one of the desired FSM states; throws an actionable error on timeout. |
+| `instrumentTtsCounter`   | Subscribe in-page to TTS / state / warning / error events.     |
+| `readVgStats(page)`      | Snapshot the accumulated counters + event log.                 |
+| `sttReady(page)`         | Ask main if Whisper is wired (skip cleanly otherwise).         |
 
 ### When a spec fails
 
