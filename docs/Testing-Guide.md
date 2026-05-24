@@ -246,3 +246,165 @@ on-demand use only.
 
 The full suite must stay green before merging — `npm test` is the
 gatekeeper.
+
+## The E2E rig
+
+Every Playwright spec talks to the **packaged** `.app` (not the dev
+build) so we exercise the exact entitlements, signature, and
+extra-resources layout a user installs. Almost everything they need is
+in
+[`tests/e2e/helpers/rig.ts`](https://github.com/VivaldiCode/voice-gateway/blob/main/tests/e2e/helpers/rig.ts).
+
+### Anatomy of a typical spec
+
+```ts
+import { expect, test } from '@playwright/test';
+import { MOCK_DEFAULT_TOKEN, startMockBridge } from '../integration/__mocks__/mock-bridge-server';
+import { scriptedTextReply } from './helpers/mock-bridge-presets';
+import { launchPackaged, packagedAppExists, type TestRig } from './helpers/rig';
+
+test.describe('my new behaviour', () => {
+  let rig: TestRig | null = null;
+
+  test.beforeAll(() => {
+    if (!packagedAppExists()) test.skip(true, 'run `npm run build:mac` first');
+  });
+
+  test.afterEach(async () => { await rig?.dispose(); rig = null; });
+
+  test('does the thing', async () => {
+    const bridge = await startMockBridge({
+      onClientMessage: scriptedTextReply('hello from the mock'),
+    });
+    rig = await launchPackaged({
+      bridgeUrl: bridge.url,
+      bridgeToken: MOCK_DEFAULT_TOKEN,
+    });
+    // ... drive the UI via rig.mainWindow, assert what you need
+    await bridge.close();
+  });
+});
+```
+
+`rig.dispose()` is idempotent and tears down both the Electron process
+and the temp `userData` directory.
+
+### What `launchPackaged` does for you
+
+1. `mkdtemp` a fresh `userData` so tests don't see each other's state.
+2. `writeSeedSettings(...)` — pre-populates electron-store with a valid
+   pairing pointing at your mock bridge, so the app skips the wizard
+   and lands on the main screen.
+3. `electron.launch({...})` with sane defaults:
+   - `--autoplay-policy=no-user-gesture-required` so `AudioContext` can
+     start synthesising without a real click;
+   - `--use-fake-device-for-media-stream` +
+     `--use-file-for-fake-audio-capture=<wav>` if you pass
+     `fakeAudioFile`. Chromium loops the WAV through every
+     `getUserMedia` call.
+4. Console forwarding (errors + warnings) onto the Playwright stdout.
+   Set `VG_E2E_VERBOSE=1` to also forward `info`/`debug` and the
+   main-process stderr — useful when a connection silently fails.
+
+### `launchUnpaired`
+
+For the PairingWizard specs — same as `launchPackaged` but without
+seeding a `pairing`. The app boots straight to step 1 of the wizard.
+
+### `openSettingsWindow(rig)`
+
+Triggers the same IPC the gear icon uses and returns the freshly-opened
+`BrowserWindow` `Page`, with the same log forwarding installed.
+
+### `instrumentTtsCounter(page)` + `readVgStats(page)`
+
+Subscribes (in-page) to `vg.conversation.onTtsChunk`,
+`onResponseText`, `onState`, `onWarning`, `onError` and stashes them on
+`window.__vg_*`. `readVgStats` returns the accumulated counts so
+assertions like `expect.poll(() => readVgStats(page).chunks)` work.
+
+### Mock-bridge presets
+
+[`tests/e2e/helpers/mock-bridge-presets.ts`](https://github.com/VivaldiCode/voice-gateway/blob/main/tests/e2e/helpers/mock-bridge-presets.ts)
+ships the common `onClientMessage` recipes:
+
+| Preset                 | Behaviour                                                    |
+|------------------------|--------------------------------------------------------------|
+| `captureTranscripts(sink)` | Push every final transcript into the array.              |
+| `scriptedTextReply(text)`  | On `end_turn`: thinking → response_text(final) → response_end. |
+| `scriptedError({code,message})` | On `end_turn`: send an `error` frame. Used by the auto-recovery spec. |
+| `sendServerAudio(ws, {…})` | One-shot helper for the binary-after-header audio path.   |
+| `composeBridge(a, b, …)`   | Stack handlers — observe AND script.                      |
+
+### Skipping STT cleanly: `VG_E2E_FAKE_TRANSCRIPT`
+
+The behaviour specs that test the orchestrator pipeline (cancel,
+barge-in, error recovery, multi-turn, …) don't want to depend on a
+working whisper.cpp install. Set
+`extraEnv: { VG_E2E_FAKE_TRANSCRIPT: 'olá' }` and the main process
+swaps in a tiny in-process fake STT adapter that always returns the
+env var as the transcript. Production code stays untouched when the
+var isn't set; the branch lives in
+[`src/main/index.ts → bootstrapConversation`](https://github.com/VivaldiCode/voice-gateway/blob/main/src/main/index.ts).
+
+### Skipping the real wake-word runner: `VG_WAKE_E2E_FAKE`
+
+Same idea for the wake-word path. With `VG_WAKE_E2E_FAKE=1`, main
+spawns
+[`resources/python/fake_wake_runner.py`](https://github.com/VivaldiCode/voice-gateway/blob/main/resources/python/fake_wake_runner.py)
+instead of `wake_word_runner.py`. The fake speaks the same JSON
+stdout protocol but emits `ready → wake` on a fixed timeline without
+touching the microphone or any model.
+
+### Fake-audio fixtures
+
+Pre-recorded WAVs live in `tests/e2e/fixtures/`:
+
+| File                  | Content                       | Use                           |
+|-----------------------|-------------------------------|-------------------------------|
+| `hi-how-are-you.wav`  | "HI! How are you today?"      | audio-conversation full turn  |
+| `wake-phrase.wav`     | "hey hermes wake up please"   | reserved for future wake spec |
+
+Recipe to regenerate on macOS:
+
+```bash
+say -v Samantha -o /tmp/x.aiff "HI! How are you today?"
+afconvert /tmp/x.aiff -d LEI16 -c 1 -r 16000 -f WAVE tests/e2e/fixtures/hi-how-are-you.wav
+```
+
+Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
+
+### What the suite currently covers (22 specs)
+
+```
+tests/e2e/
+├── audio-conversation.spec.ts   real-audio full turn (fake mic → whisper → bridge → Piper)
+├── connection.spec.ts           WS reconnect on bridge bounce, wizard URL validation
+├── conversation-extras.spec.ts  cancel, settings persistence, provider swap,
+│                                server-side audio, factory reset (5 cases)
+├── conversation-flows.spec.ts   short tap, barge-in, error recovery, multi-turn,
+│                                settings broadcast (5 cases)
+├── mic-capture.spec.ts          getUserMedia probe, real-mic RMS
+├── pairing.spec.ts              wizard happy path, friendly error on bad token
+├── settings-audio.spec.ts       speaker selector, custom-text TTS test
+└── wake-word.spec.ts            openww + phrase + tester-reset (fake runner)
+```
+
+22 specs × ~3 s each (most are <2 s; the real-audio one is ~20 s)
+totals ~1.5 minutes for a full local run.
+
+### When a spec fails
+
+Playwright's
+[`playwright.config.ts`](https://github.com/VivaldiCode/voice-gateway/blob/main/playwright.config.ts)
+defaults to `trace: 'retain-on-failure'`, `screenshot: 'only-on-failure'`,
+`video: 'retain-on-failure'`. After a failed local run:
+
+```bash
+ls test-results/
+# pick the failing test's directory, then:
+npx playwright show-trace test-results/<dir>/trace.zip
+```
+
+The trace viewer shows every network call, IPC payload, and DOM state
+at each step — usually enough to spot the broken assumption.

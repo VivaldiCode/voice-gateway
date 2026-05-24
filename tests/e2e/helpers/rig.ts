@@ -120,6 +120,65 @@ export interface TestRig {
   dispose: () => Promise<void>;
 }
 
+/**
+ * Launch the packaged app **without** seeding a pairing — exercises the
+ * first-run wizard path. Otherwise identical to `launchPackaged`.
+ */
+export async function launchUnpaired(
+  opts: Omit<LaunchOptions, 'bridgeUrl' | 'bridgeToken'> = {},
+): Promise<TestRig> {
+  const userData = await mkdtemp(join(tmpdir(), 'vg-e2e-unpaired-'));
+  // No settings.json — electron-store will create defaults with pairing=null,
+  // which triggers the PairingWizard on first render.
+
+  const args: string[] = [
+    `--user-data-dir=${userData}`,
+    '--autoplay-policy=no-user-gesture-required',
+  ];
+  if (opts.fakeAudioFile) {
+    args.push('--use-fake-device-for-media-stream');
+    args.push(`--use-file-for-fake-audio-capture=${opts.fakeAudioFile}`);
+  }
+  args.push(...(opts.extraArgs ?? []));
+
+  const app = await electron.launch({
+    executablePath: PACKAGED_EXEC,
+    args,
+    env: { ...process.env, VG_E2E: '1', ...opts.extraEnv },
+    timeout: 30_000,
+  });
+
+  if (process.env['VG_E2E_VERBOSE'] === '1') {
+    const proc = app.process();
+    proc.stderr?.on('data', (b: Buffer) =>
+      process.stderr.write(`[main stderr] ${b.toString()}`),
+    );
+    proc.stdout?.on('data', (b: Buffer) =>
+      process.stdout.write(`[main stdout] ${b.toString()}`),
+    );
+  }
+
+  const mainWindow = await app.firstWindow({ timeout: 15_000 });
+  await mainWindow.waitForLoadState('domcontentloaded');
+
+  let disposed = false;
+  const dispose = async (): Promise<void> => {
+    if (disposed) return;
+    disposed = true;
+    try {
+      await app.close();
+    } catch {
+      // ignore
+    }
+    try {
+      await rm(userData, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  };
+  return { app, mainWindow, userData, dispose };
+}
+
 export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
   const userData = await mkdtemp(join(tmpdir(), 'vg-e2e-'));
   await writeSeedSettings(userData, {

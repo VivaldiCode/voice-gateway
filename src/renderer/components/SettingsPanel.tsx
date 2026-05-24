@@ -1421,12 +1421,20 @@ function AvancadoTab(): JSX.Element {
           Apaga todas as definições (pairing, chaves API, vozes) e volta ao estado inicial.
         </p>
         {!confirming ? (
-          <Button variant="danger" onClick={() => setConfirming(true)}>
+          <Button
+            variant="danger"
+            onClick={() => setConfirming(true)}
+            data-testid="factory-reset"
+          >
             Apagar tudo
           </Button>
         ) : (
           <div className="flex gap-2">
-            <Button variant="danger" onClick={onReset}>
+            <Button
+              variant="danger"
+              onClick={onReset}
+              data-testid="factory-reset-confirm"
+            >
               Sim, apagar
             </Button>
             <Button variant="ghost" onClick={() => setConfirming(false)}>

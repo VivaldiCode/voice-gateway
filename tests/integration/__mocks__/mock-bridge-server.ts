@@ -8,6 +8,12 @@ export interface MockBridgeOptions {
   sessionId?: string;
   /** If set, intercept incoming client messages and return a scripted reply. */
   onClientMessage?: (msg: unknown, send: (m: ServerMessage) => void) => void;
+  /**
+   * Bind to a specific port instead of 0 (random). Used by the WS-reconnect
+   * E2E to restart a fresh bridge on the same port the desktop is still
+   * trying to reach.
+   */
+  port?: number;
 }
 
 export interface MockBridge {
@@ -32,7 +38,7 @@ export async function startMockBridge(opts: MockBridgeOptions = {}): Promise<Moc
   const sessionIdBase = opts.sessionId ?? 'mock-session';
 
   const wss = new WebSocketServer({
-    port: 0,
+    port: opts.port ?? 0,
     perMessageDeflate: false,
     verifyClient: (info, done) => {
       const auth = info.req.headers['authorization'];
