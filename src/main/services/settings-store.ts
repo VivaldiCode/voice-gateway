@@ -90,11 +90,21 @@ export interface SettingsStore {
   onChange(cb: (next: Settings) => void): () => void;
 }
 
-export function createSettingsStore(): SettingsStore {
+export interface CreateSettingsStoreOptions {
+  /**
+   * Override the directory `electron-store` writes to. Production passes
+   * nothing and gets `app.getPath('userData')`; tests pass a `mkdtemp()`
+   * directory so each case is isolated.
+   */
+  cwd?: string;
+}
+
+export function createSettingsStore(opts: CreateSettingsStoreOptions = {}): SettingsStore {
   const store = new Store<{ settings: Settings }>({
     name: 'voice-gateway-settings',
     defaults: { settings: defaultSettings() },
     clearInvalidConfig: true,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });
 
   // Migration: if the saved schemaVersion is lower than current, merge with

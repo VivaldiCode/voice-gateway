@@ -381,6 +381,22 @@ export async function sttReady(page: Page): Promise<{ ok: boolean; message?: str
 }
 
 /**
+ * Symmetric counterpart to sttReady. Waits until the local TTS adapter is
+ * installed + the voice model is on disk. On a fresh userData this blocks
+ * for ~15-60 s as Piper's venv is built and the voice .onnx downloaded.
+ * Callers that don't need synthesised audio (just want chunks to flow)
+ * can skip this; tests that race the FSM into SPEAKING need it.
+ */
+export async function ttsReady(page: Page): Promise<{ ok: boolean; message?: string }> {
+  return await page.evaluate(async () => {
+    const w = globalThis as unknown as {
+      vg: { tts: { prepare: () => Promise<{ ok: boolean; message?: string }> } };
+    };
+    return await w.vg.tts.prepare();
+  });
+}
+
+/**
  * Press the call button, hold for `ms` milliseconds, release. The pointer
  * event pair is what the CallButton component listens for (not click). Used
  * by every conversation-flow spec.

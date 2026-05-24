@@ -374,7 +374,7 @@ afconvert /tmp/x.aiff -d LEI16 -c 1 -r 16000 -f WAVE tests/e2e/fixtures/hi-how-a
 
 Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 
-### What the suite currently covers (28 specs)
+### What the suite currently covers (35 specs)
 
 ```
 tests/e2e/
@@ -388,12 +388,16 @@ tests/e2e/
 │                                 settings broadcast (5)
 ├── mic-capture.spec.ts           getUserMedia probe, real-mic RMS
 ├── pairing.spec.ts               wizard happy path, friendly error on bad token
+├── runtime-extras.spec.ts        output-device live-switch, error-toast contents,
+│                                 wizard probe server_version (3)
 ├── settings-audio.spec.ts        speaker selector, custom-text TTS test
+├── settings-deep.spec.ts         STT language, Piper voice picker, OpenAI key,
+│                                 Re-emparelhar wizard surface (4)
 ├── visual-states.spec.ts         warning toast lifecycle, StateOrb data-state attr (2)
 └── wake-word.spec.ts             openww + phrase + tester-reset (fake runner)
 ```
 
-28 specs totalling ~2 minutes for a full local run (the real-audio one
+35 specs totalling ~2 minutes for a full local run (the real-audio one
 is the only slow case; everything else is <3 s each thanks to the fake
 STT / fake wake runner / mock bridge stack).
 
@@ -409,6 +413,37 @@ ships these in addition to launch helpers:
 | `instrumentTtsCounter`   | Subscribe in-page to TTS / state / warning / error events.     |
 | `readVgStats(page)`      | Snapshot the accumulated counters + event log.                 |
 | `sttReady(page)`         | Ask main if Whisper is wired (skip cleanly otherwise).         |
+| `ttsReady(page)`         | Same, for Piper. Blocks while the venv auto-install runs on a fresh `userData`. |
+
+[`tests/e2e/helpers/driver.ts`](https://github.com/VivaldiCode/voice-gateway/blob/main/tests/e2e/helpers/driver.ts)
+exposes a fluent `ConversationDriver`:
+
+```ts
+const driver = await ConversationDriver.attach(rig.mainWindow);
+await ttsReady(rig.mainWindow); // skip if Piper isn't installed
+const stats = await driver.runTurn({ holdMs: 200, until: ['IDLE'] });
+expect(stats.chunks).toBeGreaterThan(0);
+```
+
+`driver` is just sugar over `holdPtt` + `waitForState` + `readVgStats`,
+but turns each spec body into a sequence of intent rather than
+orchestration plumbing. Use `driver.pressPtt()` / `releasePtt()` for
+barge-in / interrupt tests.
+
+### Settings-store migration tests
+
+[`tests/integration/settings-store.test.ts`](https://github.com/VivaldiCode/voice-gateway/blob/main/tests/integration/settings-store.test.ts)
+covers the on-disk persistence + schema-migration path:
+
+- v1 → v2 migration adds the new `wakeMode` + `wakePhrase` fields with
+  defaults while keeping every other user-set field intact.
+- v2 files round-trip untouched.
+- `set()` writes survive a store re-creation against the same `cwd`.
+- `reset()` wipes pairing and reverts `schemaVersion`.
+- `onChange` listeners unregister cleanly.
+
+The store gained a `createSettingsStore({ cwd })` option so tests can
+point it at a `mkdtemp()` directory without spinning up Electron.
 
 ### When a spec fails
 
