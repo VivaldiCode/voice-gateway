@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
@@ -7,7 +8,7 @@ import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
 import { useConversation } from '../hooks/useConversation';
 import { cn } from '../lib/cn';
-import type { SttStatus } from '../global';
+import type { SttStatus, TtsStatus } from '../global';
 
 export interface MainScreenProps {
   bridgeUrl: string | null;
@@ -16,6 +17,28 @@ export interface MainScreenProps {
 
 export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.Element {
   const conv = useConversation();
+
+  // Window-level keyboard shortcuts.
+  // - Escape: dismiss the sticky error toast, OR if we're CAPTURING, cancel
+  //   the in-flight turn so the user doesn't have to find a button.
+  // - Cmd+,: open the Settings window — macOS standard shortcut.
+  useEffect(() => {
+    const w = globalThis as unknown as {
+      addEventListener: (e: string, cb: (ev: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }) => void) => void;
+      removeEventListener: (e: string, cb: (ev: unknown) => void) => void;
+    };
+    const handler = (ev: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }): void => {
+      if (ev.key === 'Escape') {
+        if (conv.state === 'CAPTURING') conv.cancel();
+        else if (conv.error) conv.dismissError();
+      } else if (ev.key === ',' && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        onOpenSettings();
+      }
+    };
+    w.addEventListener('keydown', handler as (e: unknown) => void);
+    return () => w.removeEventListener('keydown', handler as (e: unknown) => void);
+  }, [conv, onOpenSettings]);
   const dotClass = cn(
     'h-2.5 w-2.5 rounded-full',
     conv.connection.status === 'connected'
@@ -53,10 +76,15 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           {conv.connection.status === 'connected'
             ? `Ligado ${conv.connection.latencyMs != null ? `(${conv.connection.latencyMs} ms)` : ''}`
             : conv.connection.status === 'connecting'
-              ? 'A ligar…'
-              : 'Sem ligação'}
+              ? conv.connection.reconnectAttempt > 0
+                ? `A ligar… (tentativa ${conv.connection.reconnectAttempt})`
+                : 'A ligar…'
+              : conv.connection.reconnectAttempt > 0
+                ? `Sem ligação (tentativa ${conv.connection.reconnectAttempt})`
+                : 'Sem ligação'}
         </span>
         {bridgeUrl && <span className="truncate text-zinc-600">• {bridgeUrl}</span>}
+        <ReadinessPill sttStatus={conv.sttStatus} ttsStatus={conv.ttsStatus} />
       </div>
 
       <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6">
@@ -80,13 +108,99 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           </div>
         )}
         {conv.error && (
-          <div data-testid="error-toast">
+          <div className="flex max-w-md flex-col gap-2" data-testid="error-toast">
             <CommandHint message={conv.error} variant="error" />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="error-copy-diagnostic"
+                onClick={() => {
+                  // Small structured diagnostic for bug reports / support.
+                  const diagnostic = [
+                    `voice-gateway error @ ${new Date().toISOString()}`,
+                    `bridge: ${bridgeUrl ?? '(none)'}`,
+                    `state: ${conv.state}`,
+                    `message: ${conv.error}`,
+                  ].join('\n');
+                  void navigator.clipboard.writeText(diagnostic);
+                }}
+              >
+                Copiar diagnóstico
+              </Button>
+            </div>
           </div>
         )}
       </main>
     </div>
   );
+}
+
+/**
+ * Compact "STT preparing / TTS ready" pill rendered next to the connection
+ * indicator so the user understands *why* the call button is disabled
+ * before STT/TTS adapters are wired up (esp. on first launch when Piper's
+ * venv auto-install is running). Goes away once both reach 'ready'.
+ */
+function ReadinessPill({
+  sttStatus,
+  ttsStatus,
+}: {
+  sttStatus: SttStatus;
+  ttsStatus: TtsStatus;
+}): JSX.Element | null {
+  const stt = pillStateFor(sttStatus);
+  const tts = pillStateFor(ttsStatus);
+  // Don't crowd the header once everything is ready or idle (idle ≈ not
+  // yet checked, which happens during the first few ms after the window
+  // mounts and is uninteresting).
+  if (stt === 'ok' && tts === 'ok') return null;
+  if (stt === 'silent' && tts === 'silent') return null;
+  return (
+    <span
+      data-testid="readiness-pill"
+      data-stt={sttStatus.state}
+      data-tts={ttsStatus.state}
+      className={cn(
+        'truncate rounded-full px-2 py-0.5 text-[10px]',
+        stt === 'error' || tts === 'error'
+          ? 'bg-red-900/50 text-red-200'
+          : stt === 'busy' || tts === 'busy'
+            ? 'bg-yellow-900/50 text-yellow-200'
+            : 'bg-zinc-800 text-zinc-300',
+      )}
+    >
+      {labelFor('STT', sttStatus)}
+      {' • '}
+      {labelFor('Voz', ttsStatus)}
+    </span>
+  );
+}
+
+function pillStateFor(s: SttStatus | TtsStatus): 'ok' | 'busy' | 'error' | 'silent' {
+  switch (s.state) {
+    case 'ready':
+      return 'ok';
+    case 'preparing':
+      return 'busy';
+    case 'error':
+      return 'error';
+    default:
+      return 'silent';
+  }
+}
+
+function labelFor(prefix: 'STT' | 'Voz', s: SttStatus | TtsStatus): string {
+  switch (s.state) {
+    case 'ready':
+      return `${prefix}: pronto`;
+    case 'preparing':
+      return `${prefix}: a preparar`;
+    case 'error':
+      return `${prefix}: erro`;
+    default:
+      return `${prefix}: —`;
+  }
 }
 
 function SttStatusBanner({ status }: { status: SttStatus }): JSX.Element | null {

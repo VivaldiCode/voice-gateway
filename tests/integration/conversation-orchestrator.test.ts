@@ -34,6 +34,8 @@ class FakeStt implements SttAdapter {
   readonly id = 'fake_stt';
   result: SttResult = { text: 'olá hermes' };
   shouldThrow = false;
+  /** When set, transcribe() never resolves — used to exercise STT timeout. */
+  hang = false;
   async isReady(): Promise<boolean> {
     return true;
   }
@@ -42,6 +44,7 @@ class FakeStt implements SttAdapter {
   }
   async transcribe(): Promise<SttResult> {
     if (this.shouldThrow) throw new Error('stt boom');
+    if (this.hang) return new Promise<SttResult>(() => undefined);
     return this.result;
   }
 }
@@ -70,7 +73,9 @@ class FakeTts extends EventEmitter implements TtsAdapter {
 
 let id = 0;
 
-function makeOrchestrator(): {
+function makeOrchestrator(
+  opts: { sttTimeoutMs?: number; ttsTimeoutMs?: number } = {},
+): {
   o: ConversationOrchestrator;
   client: FakeClient;
   stt: FakeStt;
@@ -90,6 +95,10 @@ function makeOrchestrator(): {
     tts,
     settings,
     { newTurnId: () => `turn-${++id}` },
+    {
+      ...(opts.sttTimeoutMs != null ? { sttMs: opts.sttTimeoutMs } : {}),
+      ...(opts.ttsTimeoutMs != null ? { ttsMs: opts.ttsTimeoutMs } : {}),
+    },
   );
   return { o, client, stt, tts, settings };
 }
@@ -267,6 +276,45 @@ describe('ConversationOrchestrator', () => {
     await new Promise((r) => setImmediate(r));
     expect(errors[0]?.[0]).toBe('WS_DISCONNECTED');
     expect(o.getState().state).toBe('ERROR');
+  });
+
+  it('STT hang fires TIMEOUT error within the configured window', async () => {
+    const { o, stt } = makeOrchestrator({ sttTimeoutMs: 50 });
+    stt.hang = true;
+    const errors: Array<[string, string]> = [];
+    o.on('error', (c, m) => errors.push([c, m]));
+    o.pttPress();
+    o.pushAudio(Buffer.from([1, 2, 3]));
+    o.pttRelease();
+    // Wait a little longer than the 50 ms cap so the race resolves.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(errors[0]?.[0]).toBe('TIMEOUT');
+    expect(errors[0]?.[1]).toMatch(/STT.*timed out/);
+    expect(o.getState().state).toBe('ERROR');
+  });
+
+  it('TTS hang fires TIMEOUT error and calls tts.stop() for cleanup', async () => {
+    const { o, client, tts } = makeOrchestrator({ ttsTimeoutMs: 50 });
+    // Make speak() never resolve.
+    tts.speak = (text: string): Promise<void> => {
+      tts.spoken.push(text);
+      return new Promise<void>(() => undefined);
+    };
+    const errors: Array<[string, string]> = [];
+    o.on('error', (c, m) => errors.push([c, m]));
+    o.pttPress();
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    (client as unknown as EventEmitter).emit('response_text', {
+      type: 'response_text',
+      turn_id: 'turn-1',
+      text: 'olá!',
+      final: true,
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(errors[0]?.[0]).toBe('TIMEOUT');
+    expect(errors[0]?.[1]).toMatch(/TTS.*timed out/);
+    expect(tts.stopped, 'orchestrator should have called tts.stop() on timeout').toBe(true);
   });
 
   it('empty transcript skips Hermes and returns to IDLE', async () => {

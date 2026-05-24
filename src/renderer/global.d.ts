@@ -62,8 +62,8 @@ interface VgApi {
     onTtsChunk: (cb: (m: { seq: number; format: string; turnId: string; data: string }) => void) => () => void;
     onError: (cb: (m: { code: string; message: string }) => void) => () => void;
     onWarning: (cb: (m: { code: string; message: string }) => void) => () => void;
-    onConnection: (cb: (m: { status: string; latencyMs: number | null; lastError: string | null }) => void) => () => void;
-    getConnection: () => Promise<{ status: string; latencyMs: number | null; lastError: string | null }>;
+    onConnection: (cb: (m: { status: string; latencyMs: number | null; lastError: string | null; reconnectAttempt: number }) => void) => () => void;
+    getConnection: () => Promise<{ status: string; latencyMs: number | null; lastError: string | null; reconnectAttempt: number }>;
     onHotkey: (cb: (phase: 'press' | 'release') => void) => () => void;
     pttPress: () => void;
     pttRelease: () => void;

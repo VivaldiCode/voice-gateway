@@ -188,7 +188,12 @@ function TokenStep({ token, onToken, probe, onTest, onBack, onNext }: TokenStepP
         <span className="text-sm font-medium">Token</span>
         <textarea
           value={token}
-          onChange={(e) => onToken(e.target.value)}
+          // install.sh prints the token inside a banner — copy/paste often
+          // catches surrounding whitespace + a trailing newline. The probe
+          // then fails with "token foi rejeitado" because the bridge does a
+          // strict bytes compare. Strip all whitespace on every keystroke
+          // so the field always reflects what'll actually be sent.
+          onChange={(e) => onToken(e.target.value.replace(/\s+/g, ''))}
           placeholder="cola aqui..."
           aria-label="Token de pairing"
           rows={3}

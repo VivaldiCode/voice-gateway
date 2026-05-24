@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AudioCapture } from '../lib/audio-capture';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 import type { TranscriptLine } from '../components/TranscriptView';
-import type { SttStatus } from '../global';
+import type { SttStatus, TtsStatus } from '../global';
 
 type State =
   | 'IDLE'
@@ -17,6 +17,8 @@ interface ConnectionDisplay {
   status: 'disconnected' | 'connecting' | 'connected' | 'error';
   latencyMs: number | null;
   lastError: string | null;
+  /** 0 while connected; ≥1 while the WS client is retrying. */
+  reconnectAttempt: number;
 }
 
 export interface ConversationApi {
@@ -28,18 +30,22 @@ export interface ConversationApi {
   /** Transient warning (auto-clears after 4s). */
   warning: string | null;
   sttStatus: SttStatus;
+  ttsStatus: TtsStatus;
   /** Mic input level in 0..1 (RMS). Only updated while capturing. */
   level: number;
   pressTalk: () => void;
   releaseTalk: () => void;
   cancel: () => void;
   bargeIn: () => void;
+  /** Clear the local sticky error (e.g. via Escape key or the close button). */
+  dismissError: () => void;
 }
 
 const INITIAL_CONNECTION: ConnectionDisplay = {
   status: 'disconnected',
   latencyMs: null,
   lastError: null,
+  reconnectAttempt: 0,
 };
 
 export function useConversation(): ConversationApi {
@@ -49,6 +55,7 @@ export function useConversation(): ConversationApi {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [sttStatus, setSttStatus] = useState<SttStatus>({ state: 'idle' });
+  const [ttsStatus, setTtsStatus] = useState<TtsStatus>({ state: 'idle' });
   const [level, setLevel] = useState(0);
   const [inputDeviceId, setInputDeviceId] = useState<string | null>(null);
   const [outputDeviceId, setOutputDeviceId] = useState<string | null>(null);
@@ -114,6 +121,7 @@ export function useConversation(): ConversationApi {
         status: m.status as ConnectionDisplay['status'],
         latencyMs: m.latencyMs,
         lastError: m.lastError,
+        reconnectAttempt: m.reconnectAttempt ?? 0,
       });
     });
     // Pull the current snapshot immediately. Without this we wait up to one
@@ -124,12 +132,14 @@ export function useConversation(): ConversationApi {
         status: m.status as ConnectionDisplay['status'],
         latencyMs: m.latencyMs,
         lastError: m.lastError,
+        reconnectAttempt: m.reconnectAttempt ?? 0,
       });
     });
     const offHotkey = window.vg.conversation.onHotkey(() => {
       // The main process drives the FSM transitions; we just react to state.
     });
     const offStt = window.vg.stt.onStatus(setSttStatus);
+    const offTtsStatus = window.vg.tts.onStatus(setTtsStatus);
 
     return () => {
       offState();
@@ -141,6 +151,7 @@ export function useConversation(): ConversationApi {
       offConn();
       offHotkey();
       offStt();
+      offTtsStatus();
     };
   }, [playback]);
 
@@ -200,11 +211,13 @@ export function useConversation(): ConversationApi {
     error,
     warning,
     sttStatus,
+    ttsStatus,
     level,
     pressTalk: () => window.vg.conversation.pttPress(),
     releaseTalk: () => window.vg.conversation.pttRelease(),
     cancel: () => window.vg.conversation.cancel(),
     bargeIn: () => window.vg.conversation.bargeIn(),
+    dismissError: () => setError(null),
   };
 }
 

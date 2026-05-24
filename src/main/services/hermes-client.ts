@@ -41,7 +41,10 @@ export interface HermesClientOptions {
 }
 
 export interface HermesClientEvents {
-  status: (status: ConnectionStatus, info: { latencyMs: number | null; lastError: string | null }) => void;
+  status: (
+    status: ConnectionStatus,
+    info: { latencyMs: number | null; lastError: string | null; reconnectAttempt: number },
+  ) => void;
   welcome: (msg: MsgWelcome) => void;
   transcript: (msg: MsgServerTranscript) => void;
   thinking: (msg: MsgThinking) => void;
@@ -373,6 +376,9 @@ export class HermesClient extends EventEmitter {
     this.emit('status', this.status, {
       latencyMs: this.lastLatencyMs,
       lastError: this.lastError,
+      // 0 while connected (we reset it on welcome). The renderer uses this to
+      // surface "A ligar… (tentativa N)" during a reconnect storm.
+      reconnectAttempt: this.reconnectAttempt,
     });
   }
 

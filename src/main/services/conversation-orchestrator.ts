@@ -13,6 +13,24 @@ import {
 } from '@shared/state-machine';
 import type { ActivationMode, Settings } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { TimeoutError, withTimeout } from '@shared/with-timeout';
+
+/**
+ * Hard caps on STT / TTS adapter operations. Both are user-friendly
+ * "something is stuck, fail loud" deadlines — they're well past any
+ * realistic working time on a healthy install (whisper-cli + base model
+ * on M1 finishes a 5 s clip in ~1 s; Piper short reply ~3 s).
+ *
+ * Exposed as orchestrator constructor options so tests can use small
+ * values (e.g. 50 ms) without `vi.useFakeTimers()`.
+ */
+export const DEFAULT_STT_TIMEOUT_MS = 30_000;
+export const DEFAULT_TTS_TIMEOUT_MS = 60_000;
+
+export interface OrchestratorTimeouts {
+  sttMs?: number;
+  ttsMs?: number;
+}
 
 export interface OrchestratorEvents {
   state: (ctx: ConversationContext) => void;
@@ -53,18 +71,24 @@ export class ConversationOrchestrator extends EventEmitter {
     this.dispatch({ type: 'RESPONSE_END' });
   };
 
+  private readonly sttTimeoutMs: number;
+  private readonly ttsTimeoutMs: number;
+
   constructor(
     private readonly client: HermesClient,
     private stt: SttAdapter,
     private tts: TtsAdapter,
     settings: Settings,
     env: ReducerEnv = defaultEnv,
+    timeouts: OrchestratorTimeouts = {},
   ) {
     super();
     this.env = env;
     this.ctx = initialContext(settings.activation.mode);
     this.currentLang = settings.stt.language;
     this.minAudioMs = Math.max(0, settings.activation.minAudioMs ?? 300);
+    this.sttTimeoutMs = timeouts.sttMs ?? DEFAULT_STT_TIMEOUT_MS;
+    this.ttsTimeoutMs = timeouts.ttsMs ?? DEFAULT_TTS_TIMEOUT_MS;
     this.bindTts();
     this.bindClient();
   }
@@ -181,16 +205,20 @@ export class ConversationOrchestrator extends EventEmitter {
 
     let transcript = '';
     try {
-      const r = await this.stt.transcribe({
-        pcm: audio,
-        language: (this.currentLang === 'auto' ? 'auto' : this.currentLang) as 'auto' | 'en' | 'pt',
-      });
+      const r = await withTimeout(
+        this.stt.transcribe({
+          pcm: audio,
+          language: (this.currentLang === 'auto' ? 'auto' : this.currentLang) as 'auto' | 'en' | 'pt',
+        }),
+        { ms: this.sttTimeoutMs, label: 'STT' },
+      );
       transcript = r.text;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown STT error';
+      const code = err instanceof TimeoutError ? ERROR_CODES.TIMEOUT : ERROR_CODES.STT_FAILED;
       log.warn('[VG] stt failed:', message);
-      this.emit('error', ERROR_CODES.STT_FAILED, message);
-      this.dispatch({ type: 'ERROR', code: ERROR_CODES.STT_FAILED, message });
+      this.emit('error', code, message);
+      this.dispatch({ type: 'ERROR', code, message });
       return;
     }
 
@@ -286,11 +314,20 @@ export class ConversationOrchestrator extends EventEmitter {
     try {
       this.dispatch({ type: 'RESPONSE_AUDIO_START' });
       this.pendingTtsTurnId = turnId;
-      await this.tts.speak(text);
+      await withTimeout(this.tts.speak(text), { ms: this.ttsTimeoutMs, label: 'TTS' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown TTS error';
+      const code = err instanceof TimeoutError ? ERROR_CODES.TIMEOUT : ERROR_CODES.TTS_FAILED;
       log.warn('[VG] tts failed:', message);
-      this.emit('error', ERROR_CODES.TTS_FAILED, message);
+      // Stop whatever's running so a stuck subprocess doesn't keep emitting
+      // chunks into the void. tts.stop() is idempotent.
+      try {
+        this.tts.stop();
+      } catch {
+        // ignore — best-effort cleanup
+      }
+      this.pendingTtsTurnId = null;
+      this.emit('error', code, message);
       this.dispatch({ type: 'RESPONSE_END' });
     }
   }

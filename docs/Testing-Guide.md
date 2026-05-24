@@ -374,7 +374,26 @@ afconvert /tmp/x.aiff -d LEI16 -c 1 -r 16000 -f WAVE tests/e2e/fixtures/hi-how-a
 
 Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 
-### What the suite currently covers (43 specs)
+### Coverage baseline (`npm run coverage`)
+
+```
+All files       | 79.7 % stmts | 79.7 % branches | 84.6 % funcs
+src/shared      | 97.0 % stmts
+src/main/services | 74.3 % stmts
+```
+
+The shared layer (FSM, protocol, helpers) is essentially fully covered.
+The remaining gap in `src/main/services/` is mostly subprocess
+fan-out paths — Piper venv auto-install, brew install, openWakeWord
+PortAudio init — that are exercised by the Playwright E2E suite (not
+counted in vitest coverage) and by the live bridge round-trip. Pure
+unit coverage above ~90% is not realistic for those without a much
+heavier mock layer; the E2E suite is the right place to catch them.
+
+The `types.ts` declaration file is intentionally excluded from the
+coverage report — it has no runtime statements and would appear as 0 %.
+
+### What the suite currently covers (48 specs)
 
 ```
 tests/e2e/
@@ -398,12 +417,16 @@ tests/e2e/
 │                                       Re-emparelhar wizard surface (4)
 ├── visual-states.spec.ts               warning toast lifecycle, StateOrb attr (2)
 ├── wake-phrase-validation.spec.ts      validation hint + Testar enable/disable (1)
+├── ux-shortcuts.spec.ts                Escape dismisses error toast,
+│                                       Cmd+, opens Settings, "Copiar diagnóstico"
+│                                       button, ReadinessPill, token paste trim (5)
 ├── wake-word.spec.ts                   openww + phrase + tester reset (3)
+├── wake-phrase-validation.spec.ts      validation hint + Testar enable/disable (1)
 └── wizard-nav.spec.ts                  back navigation preserves URL/token,
                                         token field is multi-line monospace (2)
 ```
 
-43 specs totalling ~3 minutes for a full local run. The real-audio one
+48 specs totalling ~3 minutes for a full local run. The real-audio one
 is the only slow case (~20 s — STT + Piper warmup); everything else is
 <3 s each thanks to the fake STT / fake wake runner / mock bridge stack.
 

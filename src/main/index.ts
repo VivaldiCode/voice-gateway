@@ -155,10 +155,16 @@ let ttsStatus: TtsStatus = { state: 'idle' };
 // ready-to-show so a renderer that mounted AFTER the WS already connected
 // doesn't miss the welcome event and stay "Sem ligação" until the next
 // heartbeat (which is up to 15 s away).
-let lastConnectionInfo: { status: string; latencyMs: number | null; lastError: string | null } = {
+let lastConnectionInfo: {
+  status: string;
+  latencyMs: number | null;
+  lastError: string | null;
+  reconnectAttempt: number;
+} = {
   status: 'disconnected',
   latencyMs: null,
   lastError: null,
+  reconnectAttempt: 0,
 };
 
 function send(channel: string, payload: unknown): void {
@@ -584,8 +590,8 @@ function wireMediaPermissions(): void {
 app.whenReady().then(() => {
   wireMediaPermissions();
   createMainWindow();
-  tray = createTray(getMainWindow);
-  void tray; // suppress unused warning until extended
+  tray = createTray(getMainWindow, { openSettings: openSettingsWindow });
+  void tray; // kept around so we can extend later (icon tint on wake / error)
   bootstrapConversation();
   rebuildHotkey();
   void rebuildWakeWord();
