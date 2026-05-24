@@ -38,7 +38,7 @@ src/
 │   ├── constants.ts        # IPC channels, audio rates, error codes
 │   ├── protocol.ts         # WS message types + parsers + capability negotiation
 │   ├── types.ts            # Settings, PairingInfo, ConnectionInfo, …
-│   └── state-machine.ts    # pure FSM reducer (28 tests)
+│   └── state-machine.ts    # pure FSM reducer (29 tests)
 │
 ├── main/
 │   ├── index.ts            # boot, window, hotkey, tray, pipeline wiring
@@ -87,7 +87,7 @@ The renderer's HTML CSP allows `ws:`, `wss:`, and `https:` for `connect-src` (th
 
 ## Testability principles
 
-1. The FSM is **pure** — same `(ctx, event, env)` always produces the same next context. 28 vitest cases pin its transitions.
+1. The FSM is **pure** — same `(ctx, event, env)` always produces the same next context. 29 vitest cases pin its transitions.
 2. External I/O lives behind adapter interfaces (`SttAdapter`, `TtsAdapter`, `wsFactory`, `spawnImpl`). Tests inject fakes. No mocking framework required.
 3. The mock bridge in `tests/integration/__mocks__/mock-bridge-server.ts` is the same shape as the real bridge and is used by both vitest integration tests and Playwright E2E.
 4. The renderer is decoupled from electron via `window.vg`. Components can be exercised by Playwright against the real Electron build (`tests/e2e/`).

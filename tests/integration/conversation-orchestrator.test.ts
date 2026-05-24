@@ -42,7 +42,8 @@ class FakeStt implements SttAdapter {
   async prepare(): Promise<void> {
     return;
   }
-  async transcribe(): Promise<SttResult> {
+  async transcribe(_req?: { language: string }): Promise<SttResult> {
+    void _req;
     if (this.shouldThrow) throw new Error('stt boom');
     if (this.hang) return new Promise<SttResult>(() => undefined);
     return this.result;
@@ -326,5 +327,126 @@ describe('ConversationOrchestrator', () => {
     await new Promise((r) => setImmediate(r));
     expect(client.sent).toHaveLength(0);
     expect(o.getState().state).toBe('IDLE');
+  });
+
+  // ───── Round-8 coverage push ─────
+
+  it('setMode while quiet switches activation mode and rest state', () => {
+    const { o } = makeOrchestrator();
+    expect(o.getState().mode).toBe('PUSH_TO_TALK');
+    expect(o.getState().state).toBe('IDLE');
+    o.setMode('WAKE_WORD');
+    expect(o.getState().mode).toBe('WAKE_WORD');
+    expect(o.getState().state).toBe('LISTENING_WAKE');
+  });
+
+  it('setMode mid-turn is ignored', () => {
+    const { o } = makeOrchestrator();
+    o.pttPress();
+    expect(o.getState().state).toBe('CAPTURING');
+    o.setMode('WAKE_WORD');
+    expect(o.getState().mode, 'mode must not flip mid-turn').toBe('PUSH_TO_TALK');
+  });
+
+  it('setLanguage updates the language passed to the next transcribe call', async () => {
+    const { o, stt, client } = makeOrchestrator();
+    o.setLanguage('pt');
+    const calls: Array<{ language: string }> = [];
+    const orig = stt.transcribe.bind(stt);
+    stt.transcribe = async (req?: { language: string }): Promise<SttResult> => {
+      calls.push({ language: req?.language ?? 'unknown' });
+      return await orig(req);
+    };
+    o.pttPress();
+    o.pushAudio(Buffer.from([1, 2, 3]));
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(calls[0]?.language).toBe('pt');
+    // start_turn message must also carry the lang.
+    const startTurn = client.sent.find((m) => m.type === 'start_turn');
+    expect((startTurn?.payload as { lang?: string } | undefined)?.lang).toBe('pt');
+  });
+
+  it('reset() from ERROR clears lastError and returns to rest state', async () => {
+    const { o, stt } = makeOrchestrator();
+    stt.shouldThrow = true;
+    // EventEmitter throws "Unhandled error" if 'error' fires without a
+    // listener — attach a no-op so we can inspect FSM state after.
+    o.on('error', () => undefined);
+    o.pttPress();
+    // Need some audio to bypass the minAudioMs short-circuit and actually
+    // reach the STT (which then throws).
+    o.pushAudio(Buffer.alloc(64));
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(o.getState().state).toBe('ERROR');
+    expect(o.getState().lastError).not.toBeNull();
+    o.reset();
+    expect(o.getState().state).toBe('IDLE');
+    expect(o.getState().lastError).toBeNull();
+  });
+
+  it('reset() also stops any in-flight TTS and clears the audio buffer', async () => {
+    const { o, tts } = makeOrchestrator();
+    o.pttPress();
+    o.pushAudio(Buffer.from([1, 2, 3, 4]));
+    o.reset();
+    expect(o.getState().state).toBe('IDLE');
+    expect(tts.stopped).toBe(true);
+  });
+
+  it('replaceSttAdapter swaps the active STT without losing state', async () => {
+    const { o } = makeOrchestrator();
+    const alt = new FakeStt();
+    alt.result = { text: 'novo adapter' };
+    o.replaceSttAdapter(alt);
+    const seen: string[] = [];
+    o.on('transcript_final', (t) => seen.push(t));
+    o.pttPress();
+    o.pushAudio(Buffer.from([1]));
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    expect(seen[0]).toBe('novo adapter');
+  });
+
+  it('replaceTtsAdapter unbinds old listeners + binds new ones', async () => {
+    const { o, client } = makeOrchestrator();
+    const oldTts = new FakeTts();
+    o.replaceTtsAdapter(oldTts);
+    const newTts = new FakeTts();
+    o.replaceTtsAdapter(newTts);
+    o.pttPress();
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    (client as unknown as EventEmitter).emit('response_text', {
+      type: 'response_text',
+      turn_id: 'turn-1',
+      text: 'olá',
+      final: true,
+    });
+    await new Promise((r) => setImmediate(r));
+    // The replacement adapter should be the one that spoke.
+    expect(newTts.spoken).toEqual(['olá']);
+    expect(oldTts.spoken).toEqual([]);
+  });
+
+  it('pushAudio outside CAPTURING is dropped silently', () => {
+    const { o } = makeOrchestrator();
+    o.pushAudio(Buffer.from([1, 2, 3]));
+    // No state change, no throw.
+    expect(o.getState().state).toBe('IDLE');
+  });
+
+  it('vadSilence transitions from CAPTURING the same way pttRelease does', async () => {
+    const { o, stt, client } = makeOrchestrator();
+    stt.result = { text: 'via vad' };
+    o.pttPress();
+    o.pushAudio(Buffer.from([1, 2]));
+    o.vadSilence();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(client.sent.some((m) => m.type === 'transcript')).toBe(true);
   });
 });

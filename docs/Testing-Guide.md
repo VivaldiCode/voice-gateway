@@ -204,13 +204,27 @@ npm run build:mac          # produce release/*.dmg
 npm run test:e2e
 ```
 
-Currently covers:
+Currently covers **55 tests across 17 spec files** (~3 min wall-clock,
+single worker):
 
-- Pairing wizard happy path (uses an in-process fake bridge for
-  predictable responses).
+- Pairing wizard happy path + 3-step navigation + cancel-on-step-2 +
+  whitespace-trim on token paste.
 - PTT button click → `CAPTURING` orb → release → `THINKING` → either
   empty-transcript IDLE recovery or full reply playback.
-- Settings panel opens in a separate BrowserWindow, edits persist.
+- Wake-word path (openww + custom phrase), barge-in mid-utterance,
+  brief `data-just-woke` visual flash on the main window.
+- Settings panel opens in a separate BrowserWindow, edits persist
+  across windows and across app restart; STT/TTS provider live-swap
+  rebuilds the orchestrator.
+- Output device live-switch during SPEAKING; Voz Testar with
+  custom text streamed through `AudioPlayback`.
+- Window-chrome UX: window-title FSM suffix, Cancel X during
+  CAPTURING, hotkey hint per activation mode, "Guardado" indicator
+  flash, ReadinessPill, error-toast Copy Diagnostics + Escape, tray
+  menu with Cmd+, opening Settings.
+- Re-pair to a different bridge mid-session and recover; reconnect
+  after the server bounces the socket; capability negotiation
+  (`hello` + `welcome` shape).
 
 The Playwright launcher uses `_electron.launch({ executablePath: appPath })`
 so the test boots the **same** signed bundle a user installs — catching
@@ -377,9 +391,14 @@ Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 ### Coverage baseline (`npm run coverage`)
 
 ```
-All files       | 79.7 % stmts | 79.7 % branches | 84.6 % funcs
-src/shared      | 97.0 % stmts
-src/main/services | 74.3 % stmts
+All files       | 80.96 % stmts | 82.70 % branches | 88.27 % funcs
+src/shared      | 97.01 % stmts
+src/main/services | 75.99 % stmts
+  conversation-orchestrator.ts | 86.17 % stmts
+  hermes-client.ts             | 83.61 % stmts
+  settings-store.ts            |  100   % stmts
+  tts-service.ts               | 65.37 % stmts
+  wake-word-service.ts         | 59.67 % stmts
 ```
 
 The shared layer (FSM, protocol, helpers) is essentially fully covered.
@@ -393,7 +412,7 @@ heavier mock layer; the E2E suite is the right place to catch them.
 The `types.ts` declaration file is intentionally excluded from the
 coverage report — it has no runtime statements and would appear as 0 %.
 
-### What the suite currently covers (48 specs)
+### What the suite currently covers (55 specs across 17 files)
 
 ```
 tests/e2e/
@@ -415,18 +434,21 @@ tests/e2e/
 ├── settings-audio.spec.ts              speaker selector, custom-text TTS test (2)
 ├── settings-deep.spec.ts               STT language, Piper voices, OpenAI key,
 │                                       Re-emparelhar wizard surface (4)
-├── visual-states.spec.ts               warning toast lifecycle, StateOrb attr (2)
-├── wake-phrase-validation.spec.ts      validation hint + Testar enable/disable (1)
+├── ux-round8.spec.ts                   window title FSM suffix, cancel X during
+│                                       CAPTURING, data-just-woke wake flash,
+│                                       hotkey-hint mode-aware, "Guardado" flash,
+│                                       wizard step label + cancel link (7)
 ├── ux-shortcuts.spec.ts                Escape dismisses error toast,
 │                                       Cmd+, opens Settings, "Copiar diagnóstico"
 │                                       button, ReadinessPill, token paste trim (5)
-├── wake-word.spec.ts                   openww + phrase + tester reset (3)
+├── visual-states.spec.ts               warning toast lifecycle, StateOrb attr (2)
 ├── wake-phrase-validation.spec.ts      validation hint + Testar enable/disable (1)
+├── wake-word.spec.ts                   openww + phrase + tester reset (3)
 └── wizard-nav.spec.ts                  back navigation preserves URL/token,
                                         token field is multi-line monospace (2)
 ```
 
-48 specs totalling ~3 minutes for a full local run. The real-audio one
+55 specs totalling ~3 minutes for a full local run. The real-audio one
 is the only slow case (~20 s — STT + Piper warmup); everything else is
 <3 s each thanks to the fake STT / fake wake runner / mock bridge stack.
 

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Settings as SettingsIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Settings as SettingsIcon, X as XIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
 import { CommandHint } from './CommandHint';
@@ -7,8 +7,36 @@ import { Logo } from './Logo';
 import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
 import { useConversation } from '../hooks/useConversation';
+import { useAppStore } from '../store/app-store';
 import { cn } from '../lib/cn';
 import type { SttStatus, TtsStatus } from '../global';
+
+/** Map FSM state → human-readable suffix shown in the window title bar. */
+const TITLE_SUFFIX: Record<string, string> = {
+  IDLE: 'Pronto',
+  LISTENING_WAKE: 'À escuta',
+  CAPTURING: 'A ouvir',
+  STREAMING: 'A transcrever',
+  THINKING: 'A pensar',
+  SPEAKING: 'A responder',
+  ERROR: 'Erro',
+};
+
+/** Why the call button is disabled — surfaced as a tooltip + sr-only text. */
+function disabledReason(
+  connectionStatus: string,
+  sttState: string,
+  ttsState: string,
+  state: string,
+): string | null {
+  if (state === 'ERROR') return null; // explicitly clickable for auto-recovery
+  if (connectionStatus !== 'connected') return 'Sem ligação ao Hermes';
+  if (sttState === 'preparing') return 'Reconhecimento de voz a preparar…';
+  if (sttState === 'error') return 'Reconhecimento de voz com erro — vê Definições';
+  if (sttState !== 'ready') return 'Reconhecimento de voz ainda não pronto';
+  if (ttsState === 'error') return 'Voz com erro — vê Definições';
+  return null;
+}
 
 export interface MainScreenProps {
   bridgeUrl: string | null;
@@ -17,6 +45,51 @@ export interface MainScreenProps {
 
 export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.Element {
   const conv = useConversation();
+  const settings = useAppStore((s) => s.settings);
+  const activationMode = settings?.activation.mode ?? 'PUSH_TO_TALK';
+  const globalHotkey = settings?.activation.globalHotkey ?? 'CommandOrControl+Shift+H';
+
+  // Window title reflects FSM state — visible in Cmd+Tab / macOS Mission Control.
+  useEffect(() => {
+    const doc = globalThis as unknown as { document?: { title: string } };
+    if (doc.document) {
+      const suffix = TITLE_SUFFIX[conv.state] ?? 'Pronto';
+      doc.document.title = `Voice Gateway — ${suffix}`;
+    }
+  }, [conv.state]);
+
+  // Wake-word feedback flash: when state transitions LISTENING_WAKE →
+  // CAPTURING (i.e. the runner just fired), nudge a transient "just woke"
+  // class onto the orb wrapper so the user gets a brief visible
+  // confirmation that the app heard them.
+  const prevStateRef = useRef(conv.state);
+  const [justWoke, setJustWoke] = useState(false);
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    // The renderer doesn't always observe LISTENING_WAKE as the "previous"
+    // state because the orchestrator only emits 'state' on transitions, not
+    // on construction — the very first event might already be CAPTURING
+    // (the wake-detected dispatch). So we fire the flash whenever WE
+    // transition INTO CAPTURING from anything other than CAPTURING itself
+    // in WAKE_WORD mode. False positives in PTT-from-wake-mode are
+    // harmless; the flash just confirms "we heard the trigger".
+    if (
+      activationMode === 'WAKE_WORD' &&
+      prev !== 'CAPTURING' &&
+      conv.state === 'CAPTURING'
+    ) {
+      setJustWoke(true);
+      const handle = (globalThis as unknown as {
+        setTimeout: (cb: () => void, ms: number) => number;
+      }).setTimeout(() => setJustWoke(false), 600);
+      prevStateRef.current = conv.state;
+      return () => {
+        (globalThis as unknown as { clearTimeout: (h: number) => void }).clearTimeout(handle);
+      };
+    }
+    prevStateRef.current = conv.state;
+    return;
+  }, [conv.state, activationMode]);
 
   // Window-level keyboard shortcuts.
   // - Escape: dismiss the sticky error toast, OR if we're CAPTURING, cancel
@@ -87,20 +160,31 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         <ReadinessPill sttStatus={conv.sttStatus} ttsStatus={conv.ttsStatus} />
       </div>
 
-      <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6">
+      <main
+        className="flex flex-1 flex-col items-center justify-center gap-8 px-6"
+        data-just-woke={justWoke ? 'true' : 'false'}
+      >
         <StateOrb state={conv.state} level={conv.level} />
-        <CallButton
+        <CallButtonRow
           state={conv.state}
+          connectionStatus={conv.connection.status}
+          sttState={conv.sttStatus.state}
+          ttsState={conv.ttsStatus.state}
           onPress={conv.pressTalk}
           onRelease={conv.releaseTalk}
-          /* Stay clickable when state === 'ERROR' so the new FSM
-             PTT-from-ERROR transition can recover automatically. */
-          disabled={
-            conv.connection.status !== 'connected' ||
-            (conv.sttStatus.state !== 'ready' && conv.state !== 'ERROR')
-          }
+          onCancel={conv.cancel}
         />
-        <TranscriptView lines={conv.transcript.slice(-10)} />
+        <HotkeyHint
+          activationMode={activationMode}
+          hotkey={globalHotkey}
+          wakePhrase={settings?.activation.wakePhrase ?? 'hey hermes'}
+          wakeMode={settings?.activation.wakeMode ?? 'openww'}
+          wakeWord={settings?.activation.wakeWord ?? 'hey_jarvis'}
+        />
+        <TranscriptView
+          lines={conv.transcript.slice(-10)}
+          activationMode={activationMode}
+        />
         <SttStatusBanner status={conv.sttStatus} />
         {conv.warning && (
           <div data-testid="warning-toast">
@@ -133,6 +217,108 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         )}
       </main>
     </div>
+  );
+}
+
+/**
+ * Call button + transient cancel "X" button. Splits responsibilities so the
+ * main JSX block stays readable AND the disabled-tooltip + cancel-button
+ * surface have a clear unit-of-testing.
+ */
+function CallButtonRow({
+  state,
+  connectionStatus,
+  sttState,
+  ttsState,
+  onPress,
+  onRelease,
+  onCancel,
+}: {
+  state: string;
+  connectionStatus: string;
+  sttState: string;
+  ttsState: string;
+  onPress: () => void;
+  onRelease: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const reason = disabledReason(connectionStatus, sttState, ttsState, state);
+  const disabled = reason !== null;
+  return (
+    <div className="flex items-center gap-3">
+      <div
+        className="relative"
+        title={reason ?? undefined}
+        data-testid="call-button-wrapper"
+        data-disabled-reason={reason ?? ''}
+      >
+        <CallButton
+          state={state as Parameters<typeof CallButton>[0]['state']}
+          onPress={onPress}
+          onRelease={onRelease}
+          disabled={disabled}
+        />
+        {reason && (
+          // Visually hidden text for screen readers / quick inspection,
+          // plus a tooltip via the parent's title.
+          <span className="sr-only" data-testid="call-button-disabled-reason">
+            {reason}
+          </span>
+        )}
+      </div>
+      {state === 'CAPTURING' && (
+        <button
+          type="button"
+          aria-label="Cancelar gravação"
+          data-testid="cancel-capture"
+          onClick={onCancel}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-red-700/70 text-white shadow transition hover:bg-red-600"
+        >
+          <XIcon className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Small hint under the call button explaining the trigger affordances —
+ * adapts to PUSH_TO_TALK vs WAKE_WORD modes. Hidden in ERROR state to keep
+ * the troubleshooting toast the focus.
+ */
+function HotkeyHint({
+  activationMode,
+  hotkey,
+  wakePhrase,
+  wakeMode,
+  wakeWord,
+}: {
+  activationMode: 'PUSH_TO_TALK' | 'WAKE_WORD';
+  hotkey: string;
+  wakePhrase: string;
+  wakeMode: 'openww' | 'phrase';
+  wakeWord: string;
+}): JSX.Element {
+  const prettyHotkey = hotkey
+    .replace(/CommandOrControl/, '⌘')
+    .replace(/Cmd/, '⌘')
+    .replace(/Ctrl/, '⌃')
+    .replace(/Shift/, '⇧')
+    .replace(/Alt|Option/, '⌥')
+    .replace(/\+/g, '');
+  const wakeLabel =
+    activationMode === 'WAKE_WORD'
+      ? wakeMode === 'phrase'
+        ? `ou diz «${wakePhrase}»`
+        : `ou diz «${wakeWord.replace(/_/g, ' ')}»`
+      : `ou usa ${prettyHotkey}`;
+  return (
+    <p
+      data-testid="hotkey-hint"
+      className="text-center text-[11px] text-zinc-500"
+    >
+      Carrega no botão {wakeLabel}.
+    </p>
   );
 }
 

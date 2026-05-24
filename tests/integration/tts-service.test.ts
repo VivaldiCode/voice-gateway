@@ -73,6 +73,62 @@ describe('PiperAdapter', () => {
     expect(chunks[0]?.format).toBe('pcm16_22050');
   });
 
+  it('isReady is true when binary + model + metadata all exist', async () => {
+    await fs.writeFile(join(tmpDir, 'piper'), '');
+    await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx'), '');
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx.json'), '{}');
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+    });
+    expect(await a.isReady()).toBe(true);
+  });
+
+  it('speak() rejects with a friendly error when Piper is not ready', async () => {
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper-missing'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+    });
+    await expect(a.speak('texto')).rejects.toThrow(/piper|pronto|instalada/i);
+  });
+
+  it('non-zero exit code emits an error event with the exit code', async () => {
+    await fs.writeFile(join(tmpDir, 'piper'), '');
+    await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx'), '');
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx.json'), '{}');
+
+    const fakeSpawn = (() => {
+      const proc = new EventEmitter() as EventEmitter & {
+        stdin: { end: (b?: Buffer | string) => void };
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: (s?: string) => void;
+      };
+      proc.stdin = { end: () => undefined };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = () => undefined;
+      setImmediate(() => proc.emit('close', 137));
+      return proc;
+    }) as unknown as ConstructorParameters<typeof PiperAdapter>[0]['spawnImpl'];
+
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+      spawnImpl: fakeSpawn,
+    });
+    const errors: Error[] = [];
+    a.on('error', (err: Error) => errors.push(err));
+    await a.speak('hello');
+    await new Promise((r) => setImmediate(r));
+    expect(errors[0]?.message).toMatch(/137/);
+  });
+
   it('stop kills the running process (barge-in)', async () => {
     await fs.writeFile(join(tmpDir, 'piper'), '');
     await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
@@ -176,6 +232,62 @@ describe('ElevenLabsAdapter', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     await expect(a.speak('olá')).rejects.toThrow(/elevenlabs|rejei/i);
+  });
+
+  it('throws when the API key is empty', async () => {
+    const a = new ElevenLabsAdapter({
+      config: { apiKey: '', voiceId: 'voice-x', modelId: 'm' },
+    });
+    await expect(a.speak('olá')).rejects.toThrow(/chave|API/i);
+  });
+
+  it('throws when the voice id is empty', async () => {
+    const a = new ElevenLabsAdapter({
+      config: { apiKey: 'k', voiceId: '', modelId: 'm' },
+    });
+    await expect(a.speak('olá')).rejects.toThrow(/voz|chave|API/i);
+  });
+
+  it('throws when the response has no body', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          body: null,
+          text: async () => '',
+        }) as unknown as Response,
+    );
+    const a = new ElevenLabsAdapter({
+      config: { apiKey: 'k', voiceId: 'v', modelId: 'm' },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(a.speak('olá')).rejects.toThrow(/áudio|audio|body/i);
+  });
+
+  it('uses the configured endpoint override', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 }),
+    );
+    const a = new ElevenLabsAdapter({
+      config: { apiKey: 'k', voiceId: 'voice-x', modelId: 'm' },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      endpoint: (voiceId) => `https://example.com/${voiceId}`,
+    });
+    await a.speak('hi');
+    // Drain the streaming pump.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchImpl).toHaveBeenCalled();
+    const calls = fetchImpl.mock.calls as unknown as Array<unknown[]>;
+    expect(calls[0]?.[0]).toBe('https://example.com/voice-x');
+  });
+
+  it('calling stop() before any speak() is a no-op', () => {
+    const a = new ElevenLabsAdapter({
+      config: { apiKey: 'k', voiceId: 'v', modelId: 'm' },
+    });
+    expect(() => a.stop()).not.toThrow();
   });
 });
 

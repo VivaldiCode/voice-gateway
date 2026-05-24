@@ -512,6 +512,16 @@ function createMainWindow(): BrowserWindow {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
+  // When the user returns to the app (laptop wake, Cmd+Tab back, etc.) and
+  // the WS happens to be disconnected, retry NOW instead of waiting for the
+  // current exponential-backoff slot — which could be up to 30 s away after
+  // a long offline period.
+  win.on('focus', () => {
+    if (client && !client.isConnected()) {
+      log.info('[VG] main window focused while disconnected — forcing reconnect');
+      client.reconnectNow();
+    }
+  });
 
   loadRendererInto(win);
 

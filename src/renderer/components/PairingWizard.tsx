@@ -60,6 +60,15 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
     setStep('done');
   }, [url, token, mode, wakeWord]);
 
+  const cancelWizard = (): void => {
+    // Wipe everything the user typed and return to step 1. Useful on
+    // steps 2/3 if the user realises they pasted the wrong token or
+    // chose the wrong activation mode.
+    setToken('');
+    setMode('PUSH_TO_TALK');
+    setProbe({ testing: false, result: null });
+    setStep('url');
+  };
   return (
     <div className="flex h-full w-full flex-col bg-bg">
       <div className="vg-drag flex items-center justify-center px-8 pt-9 pb-2">
@@ -99,6 +108,18 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
         )}
         {step === 'done' && <DoneStep onContinue={onComplete} />}
       </main>
+      {(step === 'token' || step === 'mode') && (
+        <footer className="border-t border-bg-subtle px-8 py-3 text-center">
+          <button
+            type="button"
+            onClick={cancelWizard}
+            data-testid="wizard-cancel"
+            className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+          >
+            Cancelar configuração
+          </button>
+        </footer>
+      )}
     </div>
   );
 }
@@ -106,18 +127,28 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
 function Stepper({ current }: { current: Step }): JSX.Element {
   const order: Step[] = ['url', 'token', 'mode', 'done'];
   const index = order.indexOf(current);
+  const displayIndex = current === 'done' ? 3 : index + 1;
   return (
-    <div className="flex items-center gap-2 px-8 pt-8">
-      {order.slice(0, 3).map((s, i) => (
-        <div
-          key={s}
-          className={cn(
-            'h-1.5 flex-1 rounded-full transition',
-            i <= index ? 'bg-accent' : 'bg-bg-panel',
-          )}
-          aria-current={i === index ? 'step' : undefined}
-        />
-      ))}
+    <div className="flex flex-col gap-2 px-8 pt-8" data-testid="wizard-stepper">
+      <div className="flex items-center gap-2">
+        {order.slice(0, 3).map((s, i) => (
+          <div
+            key={s}
+            className={cn(
+              'h-1.5 flex-1 rounded-full transition',
+              i <= index ? 'bg-accent' : 'bg-bg-panel',
+            )}
+            aria-current={i === index ? 'step' : undefined}
+            data-active={i <= index ? 'true' : 'false'}
+          />
+        ))}
+      </div>
+      <p
+        className="text-right text-[10px] uppercase tracking-wider text-zinc-500"
+        data-testid="wizard-step-label"
+      >
+        passo {displayIndex} de 3
+      </p>
     </div>
   );
 }

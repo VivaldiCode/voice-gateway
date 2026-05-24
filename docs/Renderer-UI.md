@@ -233,18 +233,23 @@ adds inline `<style>` tags.
 
 The E2E suite leans on a small set of `data-testid` attributes that
 the renderer treats as **public contract**. Don't rename them without
-updating the matching Playwright assertions — the suite (28 specs)
-will fail loud.
+updating the matching Playwright assertions — the suite (55 specs
+across 17 files) will fail loud.
 
 | Test ID                       | Component        | What it surfaces                                   |
 |-------------------------------|------------------|----------------------------------------------------|
 | `call-button`                 | `CallButton`     | The PTT button; pointer events drive press/release |
+| `call-button-wrapper`         | `MainScreen`     | The row that wraps the call button + cancel X; carries `title` with the disabled-reason tooltip when the button is greyed out |
+| `cancel-capture`              | `MainScreen`     | The small "×" button that appears next to `call-button` while in CAPTURING — clicking it ends the turn without sending audio |
+| `hotkey-hint`                 | `MainScreen`     | Subtle hint under the call button — adapts copy to push-to-talk / wake-word mode and renders the configured shortcut |
 | `state-orb`                   | `StateOrb`       | Wrapper div. Also carries `data-state="…"` (the live FSM state) for visual assertions |
 | `transcript`                  | `TranscriptView` | The scroller container                             |
+| `transcript-empty`            | `TranscriptView` | The empty-state hint (mode-aware copy) — visible only when the transcript has no turns yet |
 | `transcript-user` / `transcript-assistant` | (rows in TranscriptView) | One per turn; lets specs assert ordering + text |
-| `connection-indicator`        | `MainScreen`     | "Ligado (N ms)" / "A ligar…" / "Sem ligação"       |
+| `connection-indicator`        | `MainScreen`     | "Ligado (N ms)" / "A ligar…" (with attempt counter) / "Sem ligação" |
 | `warning-toast` / `error-toast` | `MainScreen`   | The `CommandHint` banners. `warning-toast` auto-dismisses after 4 s |
 | `tab-microfone` / `tab-voz` / `tab-ativacao` / `tab-avancado` etc. | `SettingsPanel` | One per tab in the Settings window |
+| `settings-saved-indicator`    | `SettingsPanel`  | Transient "Guardado" pill that flashes for ~1.2 s after a setting change reaches the renderer via `settings.onChange` |
 | `mic-permission`              | `SettingsPanel`  | Carries `data-status="granted|denied|…"` for the macOS TCC pill |
 | `mic-start-test` / `mic-stop-test` / `vu-meter` | Microfone tab | Live VU meter test ride |
 | `output-device-select` / `output-test-button` | Microfone tab | Speaker picker + 440 Hz tone test |
@@ -253,6 +258,21 @@ will fail loud.
 | `wake-test-button` / `wake-test-stop` / `wake-test-status` / `wake-test-transcript` / `wake-tester` | Ativação tab | "Testar agora" panel for wake detection |
 | `factory-reset` / `factory-reset-confirm`    | Avançado tab     | Two-step danger button |
 | `url-next` / `token-next` / `probe-test` / `probe-result` / `finish-pairing` / `pairing-done` / `open-app` | `PairingWizard` | Step navigation + connection probe in the wizard |
+| `wizard-step-label` / `wizard-cancel`        | `PairingWizard`  | "passo X de 3" label + the Cancelar link that wipes typed input and returns to step 1 |
+
+### `main` window data attributes
+
+The renderer also exposes a couple of state attributes on
+`window.document.querySelector('main')` so specs can poll
+visual-state changes without screenshot diffs:
+
+- `data-just-woke="true"` — flashes for ~600 ms when the FSM
+  transitions into CAPTURING via a wake event (wake-word mode
+  only). Used by `tests/e2e/ux-round8.spec.ts` to confirm the
+  brief visual cue fires.
+- `document.title` — suffixed with the friendly FSM state, e.g.
+  `Voice Gateway — A captar áudio` or `… — A pensar`. Updated
+  every transition; see `TITLE_SUFFIX` in `MainScreen.tsx`.
 
 ### `state-orb`'s `data-state` attribute
 

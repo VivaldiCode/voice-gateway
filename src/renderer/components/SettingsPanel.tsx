@@ -57,6 +57,28 @@ export function SettingsPanel({
   layout = 'side',
 }: SettingsPanelProps): JSX.Element {
   const [tab, setTab] = useState<Tab>('voz');
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  // Show a transient "Guardado" indicator whenever a settings.set lands.
+  // main only emits SETTINGS_CHANGED in response to an actual settings.set
+  // (no mount-time spurious broadcast), so every onChange tick is something
+  // the user just persisted — no need to dedupe the first event.
+  useEffect(() => {
+    let timer: number | null = null;
+    let last: string | null = null;
+    const off = window.vg.settings.onChange((s) => {
+      const next = JSON.stringify(s);
+      if (next === last) return; // dedupe identical re-broadcasts
+      last = next;
+      setSavedFlash(true);
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setSavedFlash(false), 1_200);
+    });
+    return () => {
+      off();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, []);
 
   const body = (
     <div
@@ -68,14 +90,26 @@ export function SettingsPanel({
     >
       <header className="vg-drag flex items-center justify-between border-b border-bg-subtle pr-3 pt-4 pb-3 pl-[88px]">
         <h2 className="text-lg font-semibold">Definições</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
-          aria-label="Fechar"
-        >
-          fechar
-        </button>
+        <div className="flex items-center gap-3">
+          {savedFlash && (
+            <span
+              className="vg-no-drag rounded-full bg-green-700/40 px-2 py-0.5 text-[10px] text-green-200 transition-opacity"
+              data-testid="settings-saved-indicator"
+              role="status"
+              aria-live="polite"
+            >
+              ✓ Guardado
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
+            aria-label="Fechar"
+          >
+            fechar
+          </button>
+        </div>
       </header>
       <nav className="flex shrink-0 flex-wrap gap-1 border-b border-bg-subtle px-3 py-2 text-xs">
         {TABS.map(({ id, label, icon: Icon }) => (

@@ -148,6 +148,22 @@ export class HermesClient extends EventEmitter {
     return this.status === 'connected' && this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * Cancel any pending exponential-backoff sleep and retry NOW. Used by the
+   * main process to react to window-focus events: after a laptop sleep cycle
+   * we want the user to see "Ligado" immediately, not wait another 30 s.
+   *
+   * No-op when explicitly disconnected, already connected, or when there's
+   * no pairing to retry against.
+   */
+  reconnectNow(): void {
+    if (this.explicitDisconnect) return;
+    if (!this.pairingInfo) return;
+    if (this.isConnected()) return;
+    this.cancelReconnect();
+    this.openSocket();
+  }
+
   getStatus(): ConnectionStatus {
     return this.status;
   }

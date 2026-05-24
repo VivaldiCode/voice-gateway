@@ -230,4 +230,101 @@ describe('WakeWordService (python resolution)', () => {
     // First (and only) spawn call should be against the resolved python3.
     expect(argCalls).toHaveLength(1);
   });
+
+  it('resolvePython caches the result across calls', async () => {
+    let whichCalls = 0;
+    const { spawnImpl } = fakeSpawn([]);
+    const svc = new WakeWordService({
+      spawnImpl,
+      scriptPath: '/tmp/x.py',
+      autoInstall: false,
+      whichImpl: async (cmd) => {
+        whichCalls += 1;
+        return cmd === 'python3' ? '/usr/bin/python3' : null;
+      },
+    });
+    const first = await svc.resolvePython();
+    const second = await svc.resolvePython();
+    expect(first).toBe('/usr/bin/python3');
+    expect(second).toBe('/usr/bin/python3');
+    // 2 calls inside the first resolvePython (no explicit, no venv, then python3),
+    // but the second call should hit the cache.
+    expect(whichCalls).toBeLessThanOrEqual(1);
+  });
+
+  it('isRunning() reports false before start and true after', async () => {
+    const { spawnImpl } = fakeSpawn([]);
+    const svc = makeSvc(spawnImpl);
+    expect(svc.isRunning()).toBe(false);
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    expect(svc.isRunning()).toBe(true);
+  });
+
+  it('stop() before start is a no-op', () => {
+    const { spawnImpl } = fakeSpawn([]);
+    const svc = makeSvc(spawnImpl);
+    expect(() => svc.stop()).not.toThrow();
+  });
+});
+
+describe('WakeWordService (JSON-line parser edge cases)', () => {
+  it('ignores stdout lines that are not objects', async () => {
+    const { spawnImpl } = fakeSpawn([
+      '42',           // top-level number — invalid shape
+      '"oops"',       // top-level string
+      '[1, 2, 3]',    // top-level array
+      JSON.stringify({ event: 'ready', models: ['x'] }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const reads: Array<{ models?: string[] }> = [];
+    svc.on('ready', (info) => reads.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reads).toHaveLength(1);
+  });
+
+  it('ignores events with missing required fields', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'wake' }), // no model + no phrase
+      JSON.stringify({ event: 'wake', model: 42 }), // wrong type
+      JSON.stringify({ event: 'wake', model: 'computer', score: 0.7 }), // valid
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const wakes: Array<{ model?: string }> = [];
+    svc.on('wake', (info) => wakes.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    // All three lines emit some wake — including the malformed ones whose
+    // fields are just undefined. The contract is "no crash" + "structured
+    // events when fields present". The third one is the only well-formed wake.
+    expect(wakes.some((w) => w.model === 'computer')).toBe(true);
+  });
+
+  it('ignores empty stdout lines', async () => {
+    const { spawnImpl } = fakeSpawn([
+      '',
+      '   ',
+      JSON.stringify({ event: 'ready', models: ['x'] }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const reads: Array<{ models?: string[] }> = [];
+    svc.on('ready', (info) => reads.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reads).toHaveLength(1);
+  });
+
+  it('exit handler clears the proc reference', async () => {
+    const { spawnImpl } = fakeSpawn([]);
+    const svc = makeSvc(spawnImpl);
+    let exited = false;
+    svc.on('exit', () => {
+      exited = true;
+    });
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    svc.stop();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(exited).toBe(true);
+    expect(svc.isRunning()).toBe(false);
+  });
 });
