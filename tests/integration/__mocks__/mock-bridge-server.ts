@@ -74,6 +74,12 @@ export async function startMockBridge(opts: MockBridgeOptions = {}): Promise<Moc
         return;
       }
       const parsed = parseClientMessage(value);
+      // Surface the raw payload to the test BEFORE we short-circuit on
+      // hello / ping. That way tests can observe e.g. the hello's
+      // capabilities array; they remain free to ignore types they don't
+      // care about. The mock still owns the auto-reply for hello + ping
+      // so most tests don't have to script those.
+      opts.onClientMessage?.(value, send);
       if (parsed?.type === 'hello') {
         sessionCounter += 1;
         send({
@@ -88,7 +94,6 @@ export async function startMockBridge(opts: MockBridgeOptions = {}): Promise<Moc
         send({ type: 'pong' });
         return;
       }
-      opts.onClientMessage?.(value, send);
     });
   });
 

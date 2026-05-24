@@ -22,7 +22,6 @@
 import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import {
   MOCK_DEFAULT_TOKEN,
   startMockBridge,
@@ -41,6 +40,7 @@ import {
   openSettingsWindow,
   packagedAppExists,
   readVgStats,
+  vgTmpdir,
   waitForState,
   writeSeedSettings,
   PACKAGED_EXEC,
@@ -112,7 +112,7 @@ test.describe('conversation extras', () => {
   // ───── #33: settings persist across restart
   test('settings change survives an app restart (electron-store round-trip)', async () => {
     bridge = await startMockBridge();
-    const userData = await mkdtemp(join(tmpdir(), 'vg-persist-'));
+    const userData = await mkdtemp(join(vgTmpdir(), 'vg-persist-'));
     await writeSeedSettings(userData, {
       bridgeUrl: bridge.url,
       bridgeToken: MOCK_DEFAULT_TOKEN,

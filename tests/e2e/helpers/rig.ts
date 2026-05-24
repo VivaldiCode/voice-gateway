@@ -21,11 +21,33 @@ import {
   type ElectronApplication,
   type Page,
 } from '@playwright/test';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * Where to allocate per-test `userData` directories. Defaults to the OS
+ * tmpdir, but `VG_E2E_TMPDIR` can override — useful when the system volume
+ * is tight on space (real failure mode hit during round-5: a single full
+ * Playwright run plus electron-builder's DMG staging blew through 990 MB
+ * of system /tmp and crashed the harness mid-run). Setting
+ * `VG_E2E_TMPDIR=/Volumes/<roomy-disk>/.vg-e2e` keeps the system
+ * filesystem clean while the suite runs.
+ */
+export function vgTmpdir(): string {
+  const override = process.env['VG_E2E_TMPDIR'];
+  if (override && override.trim().length > 0) {
+    try {
+      mkdirSync(override, { recursive: true });
+      return override;
+    } catch {
+      // Fall through to the system tmpdir if the override isn't writable.
+    }
+  }
+  return tmpdir();
+}
 
 const ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 export const PACKAGED_EXEC = join(
@@ -127,7 +149,7 @@ export interface TestRig {
 export async function launchUnpaired(
   opts: Omit<LaunchOptions, 'bridgeUrl' | 'bridgeToken'> = {},
 ): Promise<TestRig> {
-  const userData = await mkdtemp(join(tmpdir(), 'vg-e2e-unpaired-'));
+  const userData = await mkdtemp(join(vgTmpdir(), 'vg-e2e-unpaired-'));
   // No settings.json — electron-store will create defaults with pairing=null,
   // which triggers the PairingWizard on first render.
 
@@ -180,7 +202,7 @@ export async function launchUnpaired(
 }
 
 export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
-  const userData = await mkdtemp(join(tmpdir(), 'vg-e2e-'));
+  const userData = await mkdtemp(join(vgTmpdir(), 'vg-e2e-'));
   await writeSeedSettings(userData, {
     bridgeUrl: opts.bridgeUrl,
     bridgeToken: opts.bridgeToken,

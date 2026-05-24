@@ -374,32 +374,50 @@ afconvert /tmp/x.aiff -d LEI16 -c 1 -r 16000 -f WAVE tests/e2e/fixtures/hi-how-a
 
 Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 
-### What the suite currently covers (35 specs)
+### What the suite currently covers (43 specs)
 
 ```
 tests/e2e/
-├── audio-conversation.spec.ts    real-audio full turn (fake mic → whisper → bridge → Piper)
-├── connection.spec.ts            WS reconnect on bridge bounce, wizard URL validation
-├── conversation-advanced.spec.ts wake→full turn, MP3 server audio,
-│                                 transcript rendering, re-pair mid-session (4)
-├── conversation-extras.spec.ts   cancel, settings persistence, provider swap,
-│                                 server PCM audio, factory reset (5)
-├── conversation-flows.spec.ts    short tap, barge-in, error recovery, multi-turn,
-│                                 settings broadcast (5)
-├── mic-capture.spec.ts           getUserMedia probe, real-mic RMS
-├── pairing.spec.ts               wizard happy path, friendly error on bad token
-├── runtime-extras.spec.ts        output-device live-switch, error-toast contents,
-│                                 wizard probe server_version (3)
-├── settings-audio.spec.ts        speaker selector, custom-text TTS test
-├── settings-deep.spec.ts         STT language, Piper voice picker, OpenAI key,
-│                                 Re-emparelhar wizard surface (4)
-├── visual-states.spec.ts         warning toast lifecycle, StateOrb data-state attr (2)
-└── wake-word.spec.ts             openww + phrase + tester-reset (fake runner)
+├── audio-conversation.spec.ts          real-audio full turn (fake mic → whisper → bridge → Piper)
+├── connection.spec.ts                  WS reconnect, wizard URL validation (2)
+├── conversation-advanced.spec.ts       wake→full turn, MP3 server audio,
+│                                       transcript rendering, re-pair mid-session (4)
+├── conversation-extras.spec.ts         cancel, persistence, provider swap,
+│                                       server PCM audio, factory reset (5)
+├── conversation-flows.spec.ts          short tap, barge-in, error recovery,
+│                                       multi-turn, settings broadcast (5)
+├── mic-capture.spec.ts                 getUserMedia probe, real-mic RMS (2)
+├── pairing.spec.ts                     wizard happy path, friendly error (2)
+├── runtime-extras.spec.ts              output-device live-switch, error-toast
+│                                       contents, wizard server_version (3)
+├── runtime-protocol.spec.ts            error frame, audio backpressure (50 chunks),
+│                                       capability negotiation, hotkey persist,
+│                                       wake-event safety from non-rest states (5)
+├── settings-audio.spec.ts              speaker selector, custom-text TTS test (2)
+├── settings-deep.spec.ts               STT language, Piper voices, OpenAI key,
+│                                       Re-emparelhar wizard surface (4)
+├── visual-states.spec.ts               warning toast lifecycle, StateOrb attr (2)
+├── wake-phrase-validation.spec.ts      validation hint + Testar enable/disable (1)
+├── wake-word.spec.ts                   openww + phrase + tester reset (3)
+└── wizard-nav.spec.ts                  back navigation preserves URL/token,
+                                        token field is multi-line monospace (2)
 ```
 
-35 specs totalling ~2 minutes for a full local run (the real-audio one
-is the only slow case; everything else is <3 s each thanks to the fake
-STT / fake wake runner / mock bridge stack).
+43 specs totalling ~3 minutes for a full local run. The real-audio one
+is the only slow case (~20 s — STT + Piper warmup); everything else is
+<3 s each thanks to the fake STT / fake wake runner / mock bridge stack.
+
+### `VG_E2E_TMPDIR` — relocate per-test userData to a roomier disk
+
+The rig allocates a fresh `mkdtemp(userData)` per spec — on macOS the
+default `os.tmpdir()` is `/var/folders/...` on the system volume. A
+full 43-spec Playwright run plus electron-builder's DMG staging burns
+through ~3-5 GB of system tmp; on low-disk systems this kills the run.
+
+Set `VG_E2E_TMPDIR=/Volumes/<roomy-disk>/.vg-e2e` and the rig will
+allocate userData directories there instead (with a fallback to
+`os.tmpdir()` if the override isn't writable). Falls back silently —
+no harm in setting it always.
 
 ### Shared spec helpers
 
