@@ -54,10 +54,12 @@ function resolvePythonBin(): string | null {
  * Confirm the helper script can actually boot before we let the suite
  * run. A Python binary on PATH is not enough — the helper also needs
  * `aiohttp` and the `hermes_voice_bridge` package importable. On CI
- * the vitest job has python3 but does NOT install the bridge's Python
- * deps (only the dedicated pytest job does), so without this probe
- * the helper exits with code 1 and the spec reports four spurious
- * failures. (Same gate as PRs #17 and #23.)
+ * (GitHub Actions Ubuntu) the vitest job has `python3` but does NOT
+ * install the bridge's Python deps (only the dedicated pytest job
+ * does), so without this probe the helper exits with code 1 and the
+ * spec reports four spurious failures.
+ *
+ * (Round-12 issue #18 — same skip-gate also applied on PR #17.)
  */
 function bridgeImportsCleanly(bin: string): boolean {
   const serverSrc = join(HERE, '..', '..', 'server', 'hermes-voice-bridge', 'src');
@@ -150,10 +152,14 @@ async function bootBridge(mode: string): Promise<BootedBridge> {
   });
 }
 
-// Skip when Python is missing entirely OR when the bridge's Python
-// deps aren't installed (CI's vitest job has python3 but no aiohttp
-// or hermes_voice_bridge). The dedicated pytest job covers the bridge
-// in isolation; this integration spec is opportunistic.
+// Skip cases:
+//   - Python binary missing entirely (Node-only Linux CI)
+//   - Python present but bridge deps (`aiohttp`, `hermes_voice_bridge`)
+//     not installed — true on the GH Actions vitest job, since only the
+//     dedicated pytest job runs `pip install -e ".[dev]"` on the bridge
+//     package. The dedicated pytest job already covers the bridge in
+//     isolation; this integration spec is opportunistic when both sides
+//     happen to be available in the same environment (dev laptops).
 const SKIP = !BRIDGE_READY;
 
 describe.skipIf(SKIP)('connector → bridge integration (issue #14)', () => {

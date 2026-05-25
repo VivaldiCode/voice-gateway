@@ -65,6 +65,22 @@ export function headlessArgs(): readonly string[] {
   ];
 }
 
+/**
+ * CI-aware timeout knob. Returns `ci` when `process.env.CI` is set (GH
+ * Actions, CircleCI, etc. all set it), otherwise returns `local`. Used
+ * across the rig so dev iteration stays snappy (low timeouts surface
+ * regressions fast) while CI tolerates the slower macos-latest +
+ * headless-Chromium boot — the GH runner only has 2 vCPU and headless
+ * Chromium's BrowserWindow init can take 12-15 s under cold-cache CPU
+ * pressure (issue #18).
+ *
+ * Do not use this to paper over assertion failures — it's only for
+ * pure "wait for the OS / Chromium / Electron to do a thing" gates.
+ */
+export function ciTimeout(local: number, ci: number): number {
+  return process.env['CI'] ? ci : local;
+}
+
 export function vgTmpdir(): string {
   const override = process.env['VG_E2E_TMPDIR'];
   if (override && override.trim().length > 0) {
@@ -202,7 +218,9 @@ export async function launchUnpaired(
     executablePath: PACKAGED_EXEC,
     args,
     env: { ...process.env, VG_E2E: '1', ...opts.extraEnv },
-    timeout: 30_000,
+    // CI cold-boot for the packaged .app + Electron under load takes 30-45 s.
+    // Local runs typically settle in 5-8 s.
+    timeout: ciTimeout(30_000, 60_000),
   });
 
   if (process.env['VG_E2E_VERBOSE'] === '1') {
@@ -215,8 +233,17 @@ export async function launchUnpaired(
     );
   }
 
-  const mainWindow = await app.firstWindow({ timeout: 15_000 });
+  const mainWindow = await app.firstWindow({ timeout: ciTimeout(15_000, 45_000) });
   await mainWindow.waitForLoadState('domcontentloaded');
+  // unpaired path also benefits from early instrumentation — wizard
+  // flows can still observe state events after pairing completes.
+  await waitForVgReady(mainWindow);
+  await instrumentTtsCounter(mainWindow);
+  // Round-12 follow-up to issue #18: headless Chromium denies the
+  // clipboard-write permission. Patch every page so renderer code that
+  // calls navigator.clipboard.writeText doesn't surface as a
+  // pageerror that masks the real test outcome.
+  await grantClipboardWrite(mainWindow);
 
   let disposed = false;
   const dispose = async (): Promise<void> => {
@@ -262,7 +289,8 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     executablePath: PACKAGED_EXEC,
     args,
     env: { ...process.env, VG_E2E: '1', ...opts.extraEnv },
-    timeout: 30_000,
+    // CI cold-boot — see ciTimeout() doc.
+    timeout: ciTimeout(30_000, 60_000),
   });
 
   // Forward main-process stderr (electron-log writes there) when verbose.
@@ -280,7 +308,7 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     });
   }
 
-  const mainWindow = await app.firstWindow({ timeout: 15_000 });
+  const mainWindow = await app.firstWindow({ timeout: ciTimeout(15_000, 45_000) });
   // Forward EVERY console message during E2E. Verbosity is cheap and the
   // diagnostics save hours when a connection silently fails.
   const verboseConsole = process.env['VG_E2E_VERBOSE'] === '1';
@@ -296,6 +324,20 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     console.log(`[main pageerror] ${err.message}`);
   });
   await mainWindow.waitForLoadState('domcontentloaded');
+  // Auto-instrument the renderer EARLY so onState listeners attach
+  // before the FSM can transition. Round-12 issue #18 traced the
+  // wake-event flake to a race where the fake wake runner emitted
+  // 'wake' during the 15 s connection wait, BEFORE the spec called
+  // instrumentTtsCounter — so the LISTENING_WAKE→CAPTURING transition
+  // was missed and waitForState timed out with empty stateLog. Wiring
+  // listeners during launch removes the window entirely. Specs that
+  // still call instrumentTtsCounter() get a no-op (it's idempotent).
+  // (waitForState ALSO polls the renderer's DOM-rendered data-state as
+  // a fallback — see waitForState doc.)
+  await waitForVgReady(mainWindow);
+  await instrumentTtsCounter(mainWindow);
+  // Round-12 follow-up to issue #18: see grantClipboardWrite doc.
+  await grantClipboardWrite(mainWindow);
 
   let disposed = false;
   const dispose = async (): Promise<void> => {
@@ -317,11 +359,38 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
 }
 
 /**
+ * Wait until the preload-exposed `window.vg.conversation` API is defined.
+ * Round-12 issue #18: on CI macos-latest with headless Chromium, there's
+ * a measurable window between `domcontentloaded` firing and the preload
+ * script finishing its contextBridge.exposeInMainWorld() calls. Calling
+ * `vg.conversation.onState(...)` before that finishes silently no-ops
+ * (the property is undefined), which is what makes instrumentTtsCounter
+ * "succeed" without actually attaching any listeners.
+ */
+export async function waitForVgReady(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const w = globalThis as unknown as {
+        vg?: { conversation?: { onState?: unknown } };
+      };
+      return Boolean(w.vg?.conversation?.onState);
+    },
+    undefined,
+    { timeout: ciTimeout(10_000, 30_000) },
+  );
+}
+
+/**
  * Open the dedicated Settings BrowserWindow via the same IPC that the gear
  * icon uses, wait for it to be ready, install standard log forwarding.
+ *
+ * The waitForEvent('window') timeout was 10 s historically — empirically
+ * too tight on the GH macos-latest runner under CPU pressure where a
+ * cold BrowserWindow open can take 12-15 s. ciTimeout bumps it to 30 s
+ * on CI without slowing local iteration. (Round-12 issue #18.)
  */
 export async function openSettingsWindow(rig: TestRig): Promise<Page> {
-  const open = rig.app.waitForEvent('window', { timeout: 10_000 });
+  const open = rig.app.waitForEvent('window', { timeout: ciTimeout(10_000, 30_000) });
   await rig.mainWindow.evaluate(() => {
     const w = globalThis as unknown as {
       vg: { settings: { openWindow: () => void } };
@@ -347,6 +416,14 @@ export async function openSettingsWindow(rig: TestRig): Promise<Page> {
  * Subscribe (in-page) to `vg.conversation.onTtsChunk` and stash chunk count
  * + total bytes on `window.__vg_tts_chunks` / `__vg_tts_bytes`. Resolves
  * once the listener is attached.
+ *
+ * Idempotent (round-12 issue #18): `launchPackaged` now auto-instruments
+ * during boot so listeners attach BEFORE any FSM transition can fire.
+ * Existing test calls to this function pass an `__vg_instrumented` flag
+ * check and become no-ops. Without the guard, calling twice would
+ * register duplicate listeners — fine for counting but it would also
+ * RESET the state log to empty, hiding any transitions captured during
+ * launch (which is exactly the bug we're fixing).
  */
 export async function instrumentTtsCounter(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -368,8 +445,11 @@ export async function instrumentTtsCounter(page: Page): Promise<void> {
       __vg_state_log?: Array<{ state: string; turnId: string | null }>;
       __vg_warnings?: string[];
       __vg_errors?: string[];
+      __vg_instrumented?: boolean;
     }
     const w = globalThis as unknown as W;
+    if (w.__vg_instrumented) return;
+    w.__vg_instrumented = true;
     w.__vg_tts_chunks = 0;
     w.__vg_tts_bytes = 0;
     w.__vg_state_log = [];
@@ -392,6 +472,69 @@ export async function instrumentTtsCounter(page: Page): Promise<void> {
       w.__vg_errors!.push(`${c.code}:${c.message}`);
     });
   });
+}
+
+/**
+ * Monkey-patch `navigator.clipboard.writeText` in the renderer so
+ * `Clipboard.writeText("...")` calls always resolve, even on macos-latest
+ * headless Chromium where the clipboard-write permission is denied by
+ * default (no user-gesture, no permissions dialog).
+ *
+ * Specs that need to ASSERT on the copied value can read
+ * `window.__vg_last_clip` after the click; specs that just need the
+ * click handler not to crash get a silent swallow.
+ *
+ * Called automatically from `launchPackaged` / `launchUnpaired` so every
+ * spec is protected — round-12 follow-up to issue #18, where three
+ * specs (Cmd+S transcript export, "copiar" button, "Copiar
+ * diagnóstico" toast) intermittently failed with
+ * `[main pageerror] Failed to execute 'writeText' on 'Clipboard': Write
+ * permission denied.` on the GH macos-latest runner. The renderer's
+ * error toast was treating the pageerror as a test failure even though
+ * the user-facing copy still worked locally.
+ *
+ * Idempotent — second call is a no-op.
+ */
+export async function grantClipboardWrite(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    interface W {
+      __vg_clipboard_patched?: boolean;
+      __vg_last_clip?: string | null;
+      navigator: { clipboard?: { writeText?: (s: string) => Promise<void> } };
+    }
+    const w = globalThis as unknown as W;
+    if (w.__vg_clipboard_patched) return;
+    w.__vg_clipboard_patched = true;
+    w.__vg_last_clip = null;
+    // navigator.clipboard may be undefined when the page hasn't fully
+    // hydrated (rare, but possible during a reload). Guard against it
+    // so the helper itself doesn't throw and break the test setup.
+    if (!w.navigator.clipboard) {
+      w.navigator.clipboard = { writeText: async () => undefined };
+    }
+    const orig = w.navigator.clipboard.writeText?.bind(w.navigator.clipboard);
+    w.navigator.clipboard.writeText = async (s: string): Promise<void> => {
+      w.__vg_last_clip = s;
+      if (!orig) return;
+      try {
+        await orig(s);
+      } catch {
+        // Headless Chromium denies the write — swallow so the renderer's
+        // try/catch doesn't surface as a pageerror.
+      }
+    };
+  });
+}
+
+/**
+ * Read whatever was most recently written via the patched
+ * `navigator.clipboard.writeText`. Returns null if nothing has been
+ * written yet (or `grantClipboardWrite` wasn't called).
+ */
+export async function readLastClipboard(page: Page): Promise<string | null> {
+  return await page.evaluate(
+    () => (globalThis as unknown as { __vg_last_clip: string | null }).__vg_last_clip,
+  );
 }
 
 export interface VgStats {
@@ -467,24 +610,49 @@ export async function holdPtt(page: Page, ms: number): Promise<void> {
 }
 
 /**
- * Wait until the last `state` event recorded by `instrumentTtsCounter`
- * matches one of the given states. Returns the matching state. Throws if
- * the timeout expires without a match — surfaces what we DID see for
- * actionable diagnostics.
+ * Wait until either the last `state` event recorded by `instrumentTtsCounter`
+ * OR the renderer's own DOM-rendered state (data-testid="state-orb"
+ * data-state="...") matches one of the given states.
+ *
+ * Why two sources? The state-log path depends on the auto-instrument
+ * listener catching the IPC `state` event. On CI macos-latest the FSM
+ * can transition (e.g. fake-wake LISTENING_WAKE→CAPTURING fires at
+ * ~1.5 s post-spawn) BEFORE the auto-instrument listener attached:
+ * preload exposes `vg.conversation` shortly after `domcontentloaded`,
+ * but `webContents.send` is fire-and-forget — any state event sent
+ * during the small (T_domcontentloaded, T_listener_attached) window is
+ * lost to the auto-instrument array. The renderer's own
+ * `useConversation` hook is mounted INSIDE the React tree and catches
+ * those same events into React state, which is then rendered on the
+ * StateOrb's `data-state` attribute. The DOM reflects the current
+ * FSM state regardless of when our test-side listener attached.
+ *
+ * Returns the matching state. Throws if neither source surfaces a
+ * match within the timeout — error message includes BOTH the recent
+ * state log and the current DOM-rendered state for diagnostics.
  */
 export async function waitForState(
   page: Page,
   desired: ReadonlyArray<string>,
   opts: { timeoutMs?: number } = {},
 ): Promise<string> {
-  const timeoutMs = opts.timeoutMs ?? 10_000;
+  // Per-call timeout still wins (specs that need a tight bound — e.g.
+  // "should NOT transition within 500 ms" — keep their explicit value).
+  // Defaults bumped to 30 s on CI for headless-Chromium FSM latency.
+  // (Round-12 issue #18.)
+  const timeoutMs = opts.timeoutMs ?? ciTimeout(10_000, 30_000);
   const desiredSet = new Set(desired);
   const start = Date.now();
   let last: string = '';
+  let domLast: string = '';
   while (Date.now() - start < timeoutMs) {
     const stats = await readVgStats(page);
     last = stats.stateLog.at(-1)?.state ?? '';
     if (desiredSet.has(last)) return last;
+    // Fallback: read the renderer's DOM-rendered FSM state. Catches the
+    // race where the auto-instrument missed an early transition.
+    domLast = await readRendererState(page);
+    if (desiredSet.has(domLast)) return domLast;
     await page.waitForTimeout(100);
   }
   const recent = (await readVgStats(page)).stateLog
@@ -492,16 +660,48 @@ export async function waitForState(
     .map((s) => s.state)
     .join(' → ');
   throw new Error(
-    `waitForState timed out after ${timeoutMs} ms — wanted [${desired.join(', ')}], last=${last}, recent=${recent}`,
+    `waitForState timed out after ${timeoutMs} ms — wanted [${desired.join(', ')}], last=${last}, dom=${domLast}, recent=${recent}`,
   );
+}
+
+/**
+ * Read the current FSM state from the renderer's StateOrb component
+ * (`data-testid="state-orb"` → `data-state="..."`). Returns '' if the
+ * orb isn't on the page yet (PairingWizard mode, mid-reload, etc.).
+ *
+ * This is the renderer's React state, which is the most reliable
+ * signal of "what the FSM currently thinks it is" — the
+ * `useConversation` hook subscribes during React mount, BEFORE any
+ * post-domcontentloaded test code can attach listeners, so it
+ * doesn't suffer the same attach-timing race that the auto-instrument
+ * array does.
+ */
+export async function readRendererState(page: Page): Promise<string> {
+  try {
+    return await page.evaluate(() => {
+      // tsconfig.node.json doesn't include the DOM lib — `document` only
+      // exists at runtime inside the page context. Cast through
+      // globalThis so the typechecker doesn't blow up while the runtime
+      // behaviour is unchanged.
+      const w = globalThis as unknown as {
+        document: { querySelector: (sel: string) => { getAttribute: (k: string) => string | null } | null };
+      };
+      const el = w.document.querySelector('[data-testid="state-orb"]');
+      return el?.getAttribute('data-state') ?? '';
+    });
+  } catch {
+    // Page navigated mid-eval or context destroyed — caller will retry.
+    return '';
+  }
 }
 
 /**
  * Trigger a wake event on the **fake** wake runner. Only valid when the app
  * was launched with `VG_WAKE_E2E_FAKE=1` and `activation.mode === 'WAKE_WORD'`.
  * The fake runner emits its wake autonomously after ~1.5 s — this helper
- * just waits for the FSM to land in CAPTURING.
+ * just waits for the FSM to land in CAPTURING. Default bumped to 15 s
+ * on CI for headless-Chromium boot latency (round-12 issue #18).
  */
-export async function waitForWake(page: Page, timeoutMs = 5_000): Promise<void> {
-  await waitForState(page, ['CAPTURING'], { timeoutMs });
+export async function waitForWake(page: Page, timeoutMs?: number): Promise<void> {
+  await waitForState(page, ['CAPTURING'], { timeoutMs: timeoutMs ?? ciTimeout(5_000, 15_000) });
 }
