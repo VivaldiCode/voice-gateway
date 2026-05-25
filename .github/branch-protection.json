@@ -1,0 +1,27 @@
+{
+  "_comment": "Branch protection rules for `main`. Issue #21. Apply with: gh api -X PUT repos/VivaldiCode/voice-gateway/branches/main/protection --input .github/branch-protection.json. The schema is documented at https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection. Key choices below: require all 5 CI status checks green, dismiss stale reviews on push, require linear history (forces squash/rebase merges, no merge commits — keeps git log readable), disallow force-push, disallow direct pushes to main. The `enforce_admins` flag means even the project owner has to land through a PR; flip to false during an emergency.",
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Lint + typecheck (Node 22)",
+      "Vitest (Node 20)",
+      "Vitest (Node 22)",
+      "Pytest — hermes-voice-bridge",
+      "Playwright E2E (packaged .app, headless)"
+    ]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false,
+    "required_approving_review_count": 0,
+    "require_last_push_approval": false
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true,
+  "lock_branch": false,
+  "allow_fork_syncing": true
+}
