@@ -16,7 +16,8 @@
  *   - empty-response  — adapter yields nothing → client sees HERMES_UPSTREAM
  *                       ("Hermes respondeu mas sem texto.")
  *
- * Skipped automatically when python3 isn't on PATH — keeps vitest green
+ * Skipped automatically when no Python on PATH has `aiohttp` importable
+ * (the helper script needs it) — keeps vitest green
  * on environments where the dev hasn't installed Python (e.g. Node-only
  * Linux CI).
  */
@@ -38,11 +39,31 @@ const HELPER = join(HERE, '__helpers__', 'bridge_test_server.py');
 
 // Picked once per test file. Windows shells expose Python as `py` or
 // `python` rather than `python3`; the helper is the same either way.
+//
+// Issue #28: the previous version returned the first Python found on
+// PATH, but the helper script (`tests/integration/__helpers__/
+// bridge_test_server.py`) imports `aiohttp` to boot the bridge. On CI
+// runners where Python is present but `aiohttp` isn't (the vitest job
+// is Node-only — no `pip install` — and the Ubuntu 24.04 image now
+// ships python3), the helper crashed on import with exit code 1 and
+// the 4 scenarios reported `bridge helper (X) exited prematurely
+// code=1`. Probing `import aiohttp` here treats "Python with the
+// bridge deps installed" as the actual requirement and falls through
+// to the next candidate (or `null`) otherwise, so the existing
+// `PYTHON_BIN === null` skip-gate covers both old and new cases.
 function resolvePythonBin(): string | null {
   for (const bin of ['python3', 'python', 'py']) {
     try {
-      const r = spawnSync(bin, ['--version'], { stdio: 'ignore' });
-      if (r.status === 0) return bin;
+      const version = spawnSync(bin, ['--version'], { stdio: 'ignore' });
+      if (version.status !== 0) continue;
+      // Cheap proxy for "this Python has the bridge deps". aiohttp is
+      // the heaviest dep the helper imports; if it's there the rest
+      // (`hermes_voice_bridge.config` via sys.path injection) tend to
+      // resolve too. Failure-tolerant — falls through to the next
+      // candidate on PATH so a venv'd Python further down the list
+      // can still satisfy the gate.
+      const aiohttp = spawnSync(bin, ['-c', 'import aiohttp'], { stdio: 'ignore' });
+      if (aiohttp.status === 0) return bin;
     } catch {
       // try next candidate
     }
