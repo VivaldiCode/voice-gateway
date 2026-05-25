@@ -128,23 +128,25 @@ jobs:
         run: pytest -q
 
   # Issue #22: catches PRs that introduce new transitive deps with
-  # known high-severity vulns. Runs only on pull_request because the
-  # action needs a base + head to diff against.
+  # known high-severity vulns. Runs only on pull_request AND only when
+  # the repo opts in via the `VG_DEP_REVIEW_ENABLED` repo variable.
   #
-  # `continue-on-error: true` because the action requires the
-  # repository's "Dependency graph" setting to be enabled
-  # (Settings → Code security → Dependency graph). On public repos it's
-  # on by default; on this org's settings it currently isn't, so the
-  # job would fail with "Dependency review is not supported on this
-  # repository" until a maintainer flips the toggle. The job stays
-  # visible so CI surfaces the missing setting; flipping the toggle +
-  # promoting this to gating is a separate follow-up.
+  # The action requires the repository's "Dependency graph" setting
+  # to be enabled (Settings → Code security → Dependency graph). Until
+  # a maintainer flips that toggle, the action errors with "Dependency
+  # review is not supported on this repository" — which the rollup
+  # reports as FAILURE and trips the "all CI green" merge gate. Gating
+  # the job behind a repo variable lets us land the workflow definition
+  # now and turn it on later without churning the workflow file.
+  #
+  # To enable: GitHub repo → Settings → Secrets and variables → Actions
+  #            → Variables → New repository variable → name
+  #            `VG_DEP_REVIEW_ENABLED`, value `true`.
   dependency-review:
     name: Dependency Review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.VG_DEP_REVIEW_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0

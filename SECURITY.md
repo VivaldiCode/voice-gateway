@@ -81,7 +81,9 @@ Documented because supply-chain transparency matters:
 - **Dependabot** monitors `npm`, `pip`, and `github-actions`
   ecosystems weekly; security updates fast-track via separate PRs.
 - **Dependency Review** action blocks PRs that introduce
-  high-severity vulnerable dependencies.
+  high-severity vulnerable dependencies. Opt-in via the
+  `VG_DEP_REVIEW_ENABLED` repo variable (needs the repo's Dependency
+  Graph setting enabled in Settings → Code security).
 - **npm audit + signatures** verify installed packages were signed
   by their authors (provenance checking) on every CI run.
 - **pip-audit** flags vulnerable Python deps in the bridge.
