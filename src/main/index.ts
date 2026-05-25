@@ -576,6 +576,37 @@ ipcMain.handle(IPC.LOG_REVEAL_FILE, async () => {
   }
 });
 
+// I3 (round 12): return the last N lines of the electron-log file so the
+// renderer can render a live tail in Settings → Avançado. Read-only and
+// resilient — the renderer polls every ~1 s, so the cheaper this is the
+// better. We read the WHOLE file (small, <1 MB before rotation), split,
+// and slice to keep the implementation trivial; if the log ever gets
+// large enough to matter we can swap for a reverse-scan helper.
+ipcMain.handle(
+  IPC.LOG_READ_TAIL,
+  async (_e, payload?: { maxLines?: number }): Promise<{ ok: boolean; path: string; lines: string[]; message?: string }> => {
+    const file = log.transports.file.getFile();
+    const path = file.path;
+    const maxLines = Math.min(Math.max(payload?.maxLines ?? 200, 1), 1000);
+    try {
+      const raw = await fsPromises.readFile(path, 'utf-8');
+      const all = raw.split(/\r?\n/);
+      // Drop the trailing empty line from a final newline.
+      const trimmed = all.length > 0 && all[all.length - 1] === '' ? all.slice(0, -1) : all;
+      return { ok: true, path, lines: trimmed.slice(-maxLines) };
+    } catch (err) {
+      // File may not exist yet on a fresh install — that's not an error
+      // for the preview, just an empty buffer.
+      return {
+        ok: false,
+        path,
+        lines: [],
+        message: (err as Error).message,
+      };
+    }
+  },
+);
+
 // Renderer hands us the formatted transcript text; we let the user pick a
 // destination via the native Save dialog, then write it. The render-side
 // formatting (Tu:/Hermes: prefixes) stays in the renderer so we don't

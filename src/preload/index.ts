@@ -134,6 +134,11 @@ const api = {
     /** Reveal the electron-log file in the OS file manager. */
     revealFile: (): Promise<{ ok: boolean; path: string; message?: string }> =>
       ipcRenderer.invoke(IPC.LOG_REVEAL_FILE),
+    /** Read the last N lines of the electron-log file. */
+    readTail: (
+      maxLines = 200,
+    ): Promise<{ ok: boolean; path: string; lines: string[]; message?: string }> =>
+      ipcRenderer.invoke(IPC.LOG_READ_TAIL, { maxLines }),
   },
 
   transcript: {

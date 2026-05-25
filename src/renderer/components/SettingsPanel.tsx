@@ -1574,6 +1574,7 @@ function AvancadoTab({ settings }: { settings: Settings }): JSX.Element {
             </code>
           )}
         </div>
+        <LogPreview />
       </Section>
       <Section title="Sobre">
         <dl
@@ -1664,6 +1665,82 @@ function ProviderToggle<T extends string>({
           {o.sub && <span className="text-xs text-zinc-400">{o.sub}</span>}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Live tail of the electron-log file. Polls IPC every 1.5 s while
+ * mounted; small per-tab budget so opening Avançado doesn't bog the
+ * main process down. Auto-scrolls only when the user hasn't scrolled
+ * up (sticky-bottom heuristic).
+ */
+function LogPreview(): JSX.Element {
+  const [lines, setLines] = useState<string[]>([]);
+  const [paused, setPaused] = useState(false);
+  const scrollerRef = useRef<HTMLPreElement | null>(null);
+  const stickyRef = useRef(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async (): Promise<void> => {
+      if (cancelled || paused) return;
+      try {
+        const r = await window.vg.log.readTail(150);
+        if (!cancelled) setLines(r.lines);
+      } catch {
+        // ignore — empty buffer is fine if the file isn't ready
+      }
+    };
+    void tick();
+    const handle = window.setInterval(() => void tick(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [paused]);
+
+  // Auto-scroll to the bottom only when the user is "at the bottom"
+  // already — gives them control to scroll up + read older lines without
+  // the tail snapping them back.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    if (stickyRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lines]);
+
+  const onScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const slack = 16; // px — counts as "at bottom"
+    stickyRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= slack;
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="log-preview">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          Pré-visualização ao vivo ({lines.length} linhas)
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          data-testid="log-preview-toggle"
+          onClick={() => setPaused((p) => !p)}
+        >
+          {paused ? 'Retomar' : 'Pausar'}
+        </Button>
+      </div>
+      <pre
+        ref={scrollerRef}
+        onScroll={onScroll}
+        data-testid="log-preview-tail"
+        className="max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-all rounded-lg border border-bg-subtle bg-bg-panel/60 p-2 font-mono text-[10px] leading-tight text-zinc-400"
+      >
+        {lines.length === 0 ? '(sem linhas ainda)' : lines.join('\n')}
+      </pre>
     </div>
   );
 }
