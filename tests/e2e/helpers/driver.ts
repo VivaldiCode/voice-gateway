@@ -41,7 +41,10 @@ export class ConversationDriver {
 
   /**
    * Attach to a packaged-app page and install the in-page event log.
-   * Idempotent; calling twice on the same page resets the counters.
+   * Safe to call multiple times: `instrumentTtsCounter` is idempotent
+   * (issue #18), so the second call is a no-op that preserves the
+   * existing counters and state log — important now that
+   * `launchPackaged` auto-instruments before any FSM transition fires.
    */
   static async attach(page: Page): Promise<ConversationDriver> {
     await instrumentTtsCounter(page);

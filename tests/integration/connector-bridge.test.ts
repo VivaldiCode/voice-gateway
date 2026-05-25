@@ -59,10 +59,7 @@ function resolvePythonBin(): string | null {
  * does), so without this probe the helper exits with code 1 and the
  * spec reports four spurious failures.
  *
- * The probe spawns `python3 -c "import aiohttp, hermes_voice_bridge.config"`
- * with the same `sys.path` injection the helper uses. Importing the
- * config module is enough to fail loudly when either dep is missing
- * without paying for a full server boot.
+ * (Round-12 issue #18 — same skip-gate also applied on PR #17.)
  */
 function bridgeImportsCleanly(bin: string): boolean {
   const serverSrc = join(HERE, '..', '..', 'server', 'hermes-voice-bridge', 'src');
