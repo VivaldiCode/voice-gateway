@@ -6,6 +6,7 @@ import { CommandHint } from './CommandHint';
 import { Logo } from './Logo';
 import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
+import { TutorialOverlay } from './TutorialOverlay';
 import { useConversation } from '../hooks/useConversation';
 import { useAppStore } from '../store/app-store';
 import { cn } from '../lib/cn';
@@ -254,8 +255,32 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         : 'bg-red-500',
   );
 
+  // I5 round-12: show the post-pair tutorial on first launch with a
+  // successful pairing. settings.ui.tutorialSeen is the gate; flipping
+  // it to true (either via "Saltar" or completing the last step)
+  // persists so the overlay never re-appears unless the user resets it
+  // from Settings → Avançado. Bridge-unready states (no pairing yet,
+  // settings still loading) suppress the overlay — we only teach the UI
+  // once the user is actually going to use it.
+  const tutorialSeen = settings?.ui?.tutorialSeen ?? true;
+  const showTutorial = Boolean(settings?.pairing) && tutorialSeen === false;
+  const dismissTutorial = useCallback((): void => {
+    void window.vg.settings.set({ ui: { tutorialSeen: true } });
+  }, []);
+
   return (
     <div className="flex h-full flex-col">
+      {showTutorial && (
+        <TutorialOverlay
+          onComplete={dismissTutorial}
+          hotkey={globalHotkey
+            .replace(/CommandOrControl|Cmd/, '⌘')
+            .replace(/Ctrl/, '⌃')
+            .replace(/Shift/, '⇧')
+            .replace(/Alt|Option/, '⌥')
+            .replace(/\+/g, '')}
+        />
+      )}
       {/* macOS hiddenInset traffic lights live at top-left of the window
           inside the first ~75x28 px region. We split the header into two
           rows so the logo + our action buttons never visually fight the

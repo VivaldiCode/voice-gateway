@@ -142,10 +142,13 @@ export async function writeSeedSettings(
           elevenlabs: { apiKey: '', voiceId: '', modelId: 'eleven_turbo_v2_5' },
         },
         audio: { inputDeviceId: null, outputDeviceId: null, outputMuted: false },
-        ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false },
+        // tutorialSeen:true keeps the I5 post-pair overlay out of every
+        // E2E so existing specs aren't blocked. Specs that exercise the
+        // tutorial flow seed their own settings file.
+        ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false, tutorialSeen: true },
         connection: { recentUrls: [], draftUrl: '' },
         transcript: { recent: [] },
-        schemaVersion: 5,
+        schemaVersion: 6,
       },
     }),
   );
