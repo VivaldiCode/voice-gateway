@@ -1503,6 +1503,9 @@ function AvancadoTab({ settings }: { settings: Settings }): JSX.Element {
   const [confirming, setConfirming] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState<boolean>(false);
   const [logPath, setLogPath] = useState<string | null>(null);
+  const [language, setLanguage] = useState<'pt' | 'en'>(
+    (settings.ui?.language ?? 'pt') as 'pt' | 'en',
+  );
 
   // Pick up the current autoLaunch flag on mount and stay in sync if it
   // changes elsewhere (e.g. from another window or a settings reset).
@@ -1537,8 +1540,34 @@ function AvancadoTab({ settings }: { settings: Settings }): JSX.Element {
     // Force a reload so the wizard appears.
     location.reload();
   }, []);
+  const onLanguageChange = useCallback(
+    async (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const next = e.target.value as 'pt' | 'en';
+      setLanguage(next); // optimistic
+      await window.vg.settings.set({ ui: { language: next } });
+    },
+    [],
+  );
+
   return (
     <div className="flex flex-col gap-5">
+      <Section title="Idioma">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-zinc-500">
+            Escolhe a língua da aplicação. A janela actual recarrega
+            automaticamente quando mudas.
+          </span>
+          <select
+            data-testid="language-picker"
+            value={language}
+            onChange={onLanguageChange}
+            className="h-9 rounded-lg border border-bg-subtle bg-bg-panel px-3 text-sm text-white focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/50"
+          >
+            <option value="pt">Português</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </Section>
       <Section title="Arranque do sistema">
         <label className="flex cursor-pointer items-center justify-between gap-3">
           <div>

@@ -5,6 +5,7 @@ import { MainScreen } from './components/MainScreen';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useAppStore } from './store/app-store';
 import { useSettingsBootstrap } from './hooks/useSettings';
+import { I18nProvider } from './i18n';
 
 function detectView(): 'settings' | 'main' {
   try {
@@ -62,29 +63,42 @@ export default function App(): JSX.Element {
     );
   }
 
+  // Resolve the active locale from settings (round-12 I2). Defaults to
+  // 'pt' if for some reason settings.ui is missing (very old schemas
+  // before v1 → v5 migration), so existing users see no change.
+  const locale = settings.ui?.language ?? 'pt';
+
   // Dedicated settings window — full viewport, no main UI behind it.
   if (view === 'settings') {
     return (
-      <SettingsPanel
-        settings={settings}
-        layout="window"
-        onClose={() => window.close()}
-        onRePair={async () => {
-          await window.vg.settings.set({ pairing: null });
-          window.close();
-        }}
-      />
+      <I18nProvider locale={locale}>
+        <SettingsPanel
+          settings={settings}
+          layout="window"
+          onClose={() => window.close()}
+          onRePair={async () => {
+            await window.vg.settings.set({ pairing: null });
+            window.close();
+          }}
+        />
+      </I18nProvider>
     );
   }
 
   if (wizardActive) {
-    return <PairingWizard onComplete={() => setWizardActive(false)} />;
+    return (
+      <I18nProvider locale={locale}>
+        <PairingWizard onComplete={() => setWizardActive(false)} />
+      </I18nProvider>
+    );
   }
 
   return (
-    <MainScreen
-      bridgeUrl={settings.pairing?.url ?? null}
-      onOpenSettings={() => window.vg.settings.openWindow()}
-    />
+    <I18nProvider locale={locale}>
+      <MainScreen
+        bridgeUrl={settings.pairing?.url ?? null}
+        onOpenSettings={() => window.vg.settings.openWindow()}
+      />
+    </I18nProvider>
   );
 }
