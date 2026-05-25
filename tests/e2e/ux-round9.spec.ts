@@ -91,6 +91,14 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
 
   // ───── #102: copy conversa serialises to the clipboard
   test('"copiar" button on the transcript copies a formatted dump', async () => {
+    // Issue #30 (user-approved Option B): the copy button doesn't render
+    // until a turn completes, but the FSM's response_text → IDLE transition
+    // gets dropped on headless macOS CI, so the button locator never
+    // becomes visible. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('tudo bem'),
     });
