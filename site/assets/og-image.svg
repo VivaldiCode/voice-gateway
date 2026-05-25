@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b0d10"/>
+      <stop offset="1" stop-color="#181a22"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0.22" cy="0.35" r="0.5">
+      <stop stop-color="#7c5cff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.78" cy="0.65" r="0.4">
+      <stop stop-color="#a48bff" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#a48bff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#a48bff"/>
+    </linearGradient>
+    <linearGradient id="text-grad" x1="0" y1="0" x2="600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#a48bff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+
+  <!-- logo block -->
+  <g transform="translate(80, 240)">
+    <rect width="120" height="120" rx="26" fill="url(#mark)"/>
+    <path d="M37 38v34a23 23 0 0 0 46 0V38a23 23 0 0 0-46 0Z" fill="white" opacity="0.92"/>
+    <rect x="55" y="76" width="10" height="18" rx="3" fill="white" opacity="0.92"/>
+    <rect x="40" y="92" width="40" height="6" rx="3" fill="white" opacity="0.92"/>
+  </g>
+
+  <!-- headline -->
+  <g transform="translate(240, 240)">
+    <text x="0" y="48" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="52" font-weight="700" fill="#f4f4f5" letter-spacing="-1">Voice Gateway</text>
+    <text x="0" y="118" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="38" font-weight="700" fill="url(#text-grad)" letter-spacing="-0.5">Fala com o teu agente em voz natural.</text>
+    <text x="0" y="178" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="22" fill="#a1a1aa">macOS · Hermes · Claude · ChatGPT · MIT</text>
+  </g>
+
+  <!-- footer line -->
+  <g transform="translate(80, 540)">
+    <circle cx="6" cy="6" r="6" fill="#22c55e"/>
+    <text x="22" y="12" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="18" fill="#a1a1aa">Local-first · Open source · github.com/VivaldiCode/voice-gateway</text>
+  </g>
+</svg>

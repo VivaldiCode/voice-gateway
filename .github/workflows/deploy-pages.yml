@@ -1,0 +1,55 @@
+# Deploy the landing page (site/) to GitHub Pages.
+#
+# I12 (round 12): zero build step required — `site/` is plain HTML/CSS/SVG
+# so we just upload it as a Pages artifact. Subsequent migrations to a
+# static-site generator can swap the "Prepare site bundle" step without
+# changing the rest of the pipeline.
+#
+# Pages settings: in Settings → Pages, set "Build and deployment" to
+# "GitHub Actions". The first push to main after this workflow lands
+# becomes the live site at https://VivaldiCode.github.io/voice-gateway/.
+
+name: Deploy landing page
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare site bundle
+        run: |
+          # No build step today — this is the hook for future SSG migrations.
+          test -f site/index.html
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

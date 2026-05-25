@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice Gateway — fala com o teu agente Hermes em voz</title>
+  <meta name="description" content="Aplicação desktop minimal que liga o microfone do teu Mac a um Hermes (ou Claude Code, ChatGPT, Cursor…) em voz natural. Reconhecimento local opcional, wake-word à escolha, atalho global." />
+  <meta name="theme-color" content="#7c5cff" />
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Voice Gateway" />
+  <meta property="og:description" content="Fala com o teu agente em voz natural. Local, privado, com wake-word." />
+  <meta property="og:url" content="https://vivaldicode.github.io/voice-gateway/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://vivaldicode.github.io/voice-gateway/assets/og-image.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" type="image/svg+xml" href="assets/logo-mark.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <nav class="nav">
+    <a class="nav-brand" href="#">
+      <svg width="28" height="28" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="url(#nav-grad)"/>
+        <path d="M22 18v18a10 10 0 0 0 20 0V18a10 10 0 0 0-20 0Z" fill="white" opacity="0.92"/>
+        <rect x="30" y="40" width="4" height="10" rx="2" fill="white" opacity="0.92"/>
+        <defs>
+          <linearGradient id="nav-grad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#7c5cff"/>
+            <stop offset="1" stop-color="#a48bff"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span>Voice Gateway</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Funcionalidades</a>
+      <a href="#how">Como funciona</a>
+      <a href="#install">Instalar</a>
+      <a href="#faq">FAQ</a>
+      <a class="nav-cta" href="https://github.com/VivaldiCode/voice-gateway">GitHub</a>
+    </div>
+  </nav>
+
+  <!-- ============================================ HERO ============================================ -->
+  <header class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-inner">
+      <div class="hero-text">
+        <span class="eyebrow">Desktop · macOS · privado</span>
+        <h1>Fala com o teu agente em <span class="grad-text">voz natural</span>.</h1>
+        <p class="lede">
+          Voice Gateway é uma aplicação minimal que liga o microfone do teu
+          Mac a um agente <strong>Hermes</strong> — ou ChatGPT, Claude Code,
+          Cursor — em conversa de voz fluida. Reconhecimento local opcional,
+          wake-word à escolha, atalho global. Sem cloud obrigatória.
+        </p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="#install">↓ Descarregar para macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/VivaldiCode/voice-gateway">Ver no GitHub</a>
+        </div>
+        <ul class="hero-meta">
+          <li><span class="dot dot-green"></span>Open source (MIT)</li>
+          <li><span class="dot dot-violet"></span>Funciona offline com Piper + Whisper</li>
+          <li><span class="dot dot-yellow"></span>Wake-word opcional</li>
+        </ul>
+      </div>
+      <div class="hero-mock" aria-hidden="true">
+        <!-- App mockup matching the actual UI theme -->
+        <div class="app-frame">
+          <div class="app-titlebar">
+            <span class="tl tl-red"></span>
+            <span class="tl tl-yellow"></span>
+            <span class="tl tl-green"></span>
+          </div>
+          <div class="app-header">
+            <div class="app-brand">
+              <span class="app-logo"></span>
+              <span class="app-name">Voice Gateway</span>
+            </div>
+            <div class="app-actions">
+              <span class="app-icon">🔊</span>
+              <span class="app-icon">⚙</span>
+            </div>
+          </div>
+          <div class="app-status">
+            <span class="status-dot status-green"></span>
+            <span class="status-text">Ligado (12 ms) · ws://10.0.19.1:8765</span>
+          </div>
+          <div class="app-body">
+            <div class="app-orb">
+              <div class="orb-inner"></div>
+            </div>
+            <p class="app-state">A ouvir…</p>
+            <div class="app-mic">
+              <span class="mic-glyph">🎤</span>
+            </div>
+            <div class="app-vu"><div class="vu-fill"></div></div>
+            <p class="app-hint">Carrega no botão ou diz «hey hermes».</p>
+            <div class="app-transcript">
+              <span class="transcript-role">tu</span>
+              <span class="transcript-text">como está o tempo hoje?</span>
+            </div>
+            <div class="app-transcript transcript-assistant">
+              <span class="transcript-role">hermes</span>
+              <span class="transcript-text">15 ºC e sol em Lisboa — bom para sair.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================ FEATURES ============================================ -->
+  <section id="features" class="features">
+    <h2 class="section-title">Pensado para conversas, não comandos.</h2>
+    <p class="section-lede">Tudo o que precisas para falar com o teu agente como falas com um humano.</p>
+    <div class="features-grid">
+      <div class="feature">
+        <div class="feature-icon">🎙️</div>
+        <h3>Push-to-talk + wake-word</h3>
+        <p>Atalho global (⌘⇧H por defeito) ou palavra-chave personalizável («hey hermes», «alexa», …). Captação visual com VU meter e cronómetro de gravação.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🧠</div>
+        <h3>STT local ou cloud</h3>
+        <p>whisper.cpp local (offline, privado) ou OpenAI Whisper API. Mudas a qualquer momento sem reiniciar — instalação automática via Homebrew.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔊</div>
+        <h3>Voz natural sem internet</h3>
+        <p>Piper (local, ~30 MB por voz) ou ElevenLabs cloud. Catálogo de vozes em PT, EN, ES e mais. Barge-in: interrompe a meio para fazer outra pergunta.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔌</div>
+        <h3>Multi-agente</h3>
+        <p>Bridge desenhado para qualquer agente OpenAI-compatível. Hoje: Hermes. Brevemente: Claude Code, ChatGPT, Cursor, OpenClaw — todos pela mesma ponte.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>Atalhos para tudo</h3>
+        <p>⌘L limpa, ⌘R reverte erros, ⌘S exporta a conversa, ⌘, abre Definições. Tudo fica num só ecrã pequeno que cabe no canto do monitor.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔐</div>
+        <h3>Local-first &amp; privado</h3>
+        <p>O bridge corre no teu servidor (não nosso). Token de pareamento via QR ou copy-paste. Sem telemetria, sem analytics, sem contas.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ HOW IT WORKS ============================================ -->
+  <section id="how" class="how">
+    <h2 class="section-title">Três peças, uma conversa.</h2>
+    <p class="section-lede">Quem fala onde, e porquê.</p>
+    <div class="how-flow">
+      <div class="how-card">
+        <div class="how-num">1</div>
+        <h3>App desktop</h3>
+        <p>Microfone, transcrição, leitura em voz alta. UI minimal para esquecer que está lá.</p>
+        <span class="how-pill">Electron · React · TypeScript</span>
+      </div>
+      <div class="how-arrow">→</div>
+      <div class="how-card">
+        <div class="how-num">2</div>
+        <h3>Bridge WebSocket</h3>
+        <p>Pequeno serviço Python no teu servidor. Recebe transcrições, devolve respostas em streaming.</p>
+        <span class="how-pill">aiohttp · systemd · ~200 linhas</span>
+      </div>
+      <div class="how-arrow">→</div>
+      <div class="how-card">
+        <div class="how-num">3</div>
+        <h3>O teu agente</h3>
+        <p>Hermes, ChatGPT, Claude Code, Cursor — qualquer endpoint que fale OpenAI Chat Completions.</p>
+        <span class="how-pill">/v1/chat/completions</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ SCREENSHOTS ============================================ -->
+  <section id="shots" class="shots">
+    <h2 class="section-title">Vê em acção.</h2>
+    <p class="section-lede">Três ecrãs, zero clutter.</p>
+    <div class="shots-grid">
+      <figure class="shot">
+        <div class="shot-frame shot-main">
+          <div class="shot-title">main · IDLE</div>
+          <div class="shot-mock"><div class="shot-orb"></div><div class="shot-btn"></div></div>
+        </div>
+        <figcaption>Janela principal — orb que pulsa quando ouve e dá feedback visual a cada turno.</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="shot-frame shot-settings">
+          <div class="shot-title">settings · Voz</div>
+          <div class="shot-mock shot-mock-settings">
+            <div class="shot-tab shot-tab-active">Voz</div>
+            <div class="shot-tab">Microfone</div>
+            <div class="shot-tab">Reconhecimento</div>
+            <div class="shot-tab">Conexão</div>
+          </div>
+        </div>
+        <figcaption>Definições — voz, microfone, wake-word, log preview, factory reset.</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="shot-frame shot-wizard">
+          <div class="shot-title">first run · wizard</div>
+          <div class="shot-mock shot-mock-wizard">
+            <div class="wizard-steps">
+              <span class="wizard-step wizard-active"></span>
+              <span class="wizard-step"></span>
+              <span class="wizard-step"></span>
+            </div>
+            <div class="wizard-title">Onde está o teu Hermes?</div>
+            <div class="wizard-input">ws://hermes.casa.lan:8765</div>
+            <div class="wizard-btn">Continuar</div>
+          </div>
+        </div>
+        <figcaption>Setup em 3 passos: URL → token → modo de ativação. Lembra-se de tudo.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============================================ INSTALL ============================================ -->
+  <section id="install" class="install">
+    <h2 class="section-title">Instalar em 3 minutos.</h2>
+    <div class="install-grid">
+      <div class="install-step">
+        <h3><span class="step-num">1</span> No servidor (Linux)</h3>
+        <p>Corre o instalador. Cria um utilizador, configura systemd, e imprime o token.</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh | bash</code></pre>
+        <p class="step-detail">Funciona em Debian/Ubuntu, Fedora, Arch, openSUSE. Outros agentes brevemente — usa <code>--agent=&lt;name&gt;</code>.</p>
+      </div>
+      <div class="install-step">
+        <h3><span class="step-num">2</span> No Mac</h3>
+        <p>Descarrega o DMG e arrasta para Aplicações.</p>
+        <a class="btn btn-primary btn-block" href="https://github.com/VivaldiCode/voice-gateway/releases/latest">↓ Última versão (.dmg arm64)</a>
+        <p class="step-detail">macOS 12 Monterey ou superior. Apple Silicon + Intel.</p>
+      </div>
+      <div class="install-step">
+        <h3><span class="step-num">3</span> Emparelhar</h3>
+        <p>Abre a app, cola a URL + token impressos no passo 1. O wizard valida e fecha.</p>
+        <p class="step-detail">Vai a Definições → Reconhecimento para escolher entre Whisper local ou OpenAI API — fica pronto a falar contigo.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ FAQ ============================================ -->
+  <section id="faq" class="faq">
+    <h2 class="section-title">Perguntas frequentes</h2>
+    <details class="faq-item" open>
+      <summary>Funciona sem internet?</summary>
+      <p>Sim, se escolheres <strong>Whisper local</strong> (STT) + <strong>Piper</strong> (TTS) + um agente que corra na tua rede. A app, o bridge e o agente podem todos estar offline.</p>
+    </details>
+    <details class="faq-item">
+      <summary>Que agentes suporta hoje?</summary>
+      <p><strong>Hermes</strong> (NousResearch) é o único oficialmente suportado neste momento. O bridge é desenhado para qualquer endpoint <code>/v1/chat/completions</code> compatível com OpenAI, então tecnicamente ChatGPT e a maioria dos servidores de LLM open-source também funcionam — falta só o flag <code>--agent=</code> que está documentado em <a href="https://github.com/VivaldiCode/voice-gateway/blob/main/docs/Agents.md">docs/Agents.md</a>.</p>
+    </details>
+    <details class="faq-item">
+      <summary>Que sistemas operativos?</summary>
+      <p>A app desktop é <strong>macOS only</strong> por enquanto (Apple Silicon + Intel). O bridge corre em <strong>Linux</strong> (Debian, Ubuntu, Fedora, Arch, openSUSE — qualquer distro com systemd). Windows + Linux desktop ficam no roadmap.</p>
+    </details>
+    <details class="faq-item">
+      <summary>Privacidade?</summary>
+      <p>Zero telemetria. Sem contas. O áudio vai do teu Mac directamente para o teu bridge, que está no teu servidor. Se escolheres Whisper local + Piper local, nada chega à internet pública. Se escolheres OpenAI ou ElevenLabs, vai só esse pedaço — a app não acrescenta nada por cima.</p>
+    </details>
+    <details class="faq-item">
+      <summary>Posso contribuir?</summary>
+      <p>Sim. PRs welcome no <a href="https://github.com/VivaldiCode/voice-gateway">GitHub</a>. Há um CI automatizado que corre vitest + pytest + Playwright a cada PR — vê o <a href="https://github.com/VivaldiCode/voice-gateway/blob/main/docs/Testing-Guide.md">Testing Guide</a>.</p>
+    </details>
+    <details class="faq-item">
+      <summary>Quanto custa?</summary>
+      <p>Grátis e <strong>MIT</strong>. Self-hosted, sem subscrição. O único custo possível é se escolheres OpenAI API ou ElevenLabs pelos seus preços.</p>
+    </details>
+  </section>
+
+  <!-- ============================================ FOOTER ============================================ -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div>
+        <div class="footer-brand">Voice Gateway</div>
+        <p class="footer-tag">Fala com o teu agente como falas com um humano.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/VivaldiCode/voice-gateway">GitHub</a>
+        <a href="https://github.com/VivaldiCode/voice-gateway/wiki">Wiki</a>
+        <a href="https://github.com/VivaldiCode/voice-gateway/blob/main/docs/Agents.md">Agents.md</a>
+        <a href="https://github.com/VivaldiCode/voice-gateway/issues">Issues</a>
+      </div>
+      <p class="footer-copy">© 2026 VivaldiCode · MIT licence · Built with care for people who don't enjoy typing.</p>
+    </div>
+  </footer>
+
+  <script>
+    // Minimal smooth scroll for the nav anchors.
+    document.querySelectorAll('a[href^="#"]').forEach((a) => {
+      a.addEventListener('click', (e) => {
+        const id = a.getAttribute('href');
+        if (!id || id === '#') return;
+        const el = document.querySelector(id);
+        if (!el) return;
+        e.preventDefault();
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  </script>
+</body>
+</html>
