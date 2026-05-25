@@ -109,8 +109,15 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
   useEffect(() => {
     const doc = globalThis as unknown as { document?: { title: string } };
     if (doc.document) {
-      const suffix =
-        (t.state as Record<string, string>)[conv.state] ?? t.state.IDLE;
+      // Look up the locale-mapped state label safely. `conv.state` is a
+      // plain `string` from the orchestrator and the previous
+      // `as Record<string, string>` cast hid that an unknown state
+      // could yield `undefined`. Widening to a `string | undefined`
+      // record keeps `noUncheckedIndexedAccess` honest so the `??`
+      // fallback runs when the orchestrator emits a state we forgot to
+      // translate, instead of smuggling `undefined` into the title.
+      const stateLabels = t.state as Readonly<Record<string, string | undefined>>;
+      const suffix = stateLabels[conv.state] ?? t.state.IDLE;
       doc.document.title = t.app.windowTitle(suffix);
     }
   }, [conv.state, t]);

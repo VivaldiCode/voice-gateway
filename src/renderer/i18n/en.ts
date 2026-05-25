@@ -68,7 +68,7 @@ export const en: Dictionary = {
     orShortcut: (hotkey) => `or use ${hotkey}`,
   },
   connection: {
-    connectedWithLatency: (ms) => (ms != null ? `Connected (${ms} ms)` : 'Connected '),
+    connectedWithLatency: (ms) => (ms != null ? `Connected (${ms} ms)` : 'Connected'),
     connecting: 'Connecting…',
     connectingAttempt: (n) => `Connecting… (attempt ${n})`,
     disconnectedClick: 'Offline — click to retry',

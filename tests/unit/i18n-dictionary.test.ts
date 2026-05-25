@@ -48,17 +48,23 @@ function leaves(obj: Record<string, unknown>, prefix = ''): Leaf[] {
   return out;
 }
 
-/** Representative input for each function-shaped key path. Update this
- *  table when adding a new formatter key. */
-const FN_ARGS: Record<string, unknown[]> = {
-  'app.windowTitle': ['Ready'],
-  'transcript.nMessages': [3],
-  'hotkeyHint.template': ['or press ⌘H'],
-  'hotkeyHint.sayWakePhrase': ['hey hermes'],
-  'hotkeyHint.orShortcut': ['⌘H'],
-  'connection.connectedWithLatency': [42],
-  'connection.connectingAttempt': [2],
-  'connection.disconnectedAttempt': [3],
+/** Representative input set(s) for each function-shaped key path. Each
+ *  entry is an array of argument-lists so a single key can be exercised
+ *  with multiple shapes (e.g. `connectedWithLatency(42)` AND
+ *  `connectedWithLatency(null)` — both branches must produce a clean
+ *  string). Update this table when adding a new formatter key. */
+const FN_ARGS: Record<string, unknown[][]> = {
+  'app.windowTitle': [['Ready']],
+  'transcript.nMessages': [[3], [1], [0]],
+  'hotkeyHint.template': [['or press ⌘H']],
+  'hotkeyHint.sayWakePhrase': [['hey hermes']],
+  'hotkeyHint.orShortcut': [['⌘H']],
+  // Cover both the "connected with latency" and "connected without
+  // latency" branches — the second one regressed once with a trailing
+  // space ('Ligado ') that this test would have caught.
+  'connection.connectedWithLatency': [[42], [null]],
+  'connection.connectingAttempt': [[2]],
+  'connection.disconnectedAttempt': [[3]],
 };
 
 function assertLeavesAreUsable(dict: Dictionary, label: string): void {
@@ -67,15 +73,35 @@ function assertLeavesAreUsable(dict: Dictionary, label: string): void {
   for (const { path, value } of ls) {
     if (typeof value === 'string') {
       expect(value.length, `${label}: leaf "${path}" should be non-empty`).toBeGreaterThan(0);
+      // Trailing whitespace in a string leaf is almost always a typo
+      // and renders as awkward dangling space (e.g. tooltips, aria
+      // labels). The PR-16 review caught a `'Ligado '` regression in
+      // `connectedWithLatency(null)` — guard against analogous slips
+      // in string leaves too.
+      expect(value, `${label}: leaf "${path}" has trailing whitespace`).toBe(value.trimEnd());
     } else if (typeof value === 'function') {
-      const args = FN_ARGS[path];
+      const argSets = FN_ARGS[path];
       expect(
-        args,
+        argSets,
         `${label}: function leaf "${path}" has no representative args defined in FN_ARGS — add one to this test`,
       ).toBeDefined();
-      const out = (value as (...a: unknown[]) => unknown)(...(args ?? []));
-      expect(typeof out, `${label}: function leaf "${path}" must return a string`).toBe('string');
-      expect((out as string).length, `${label}: function leaf "${path}" returned empty string`).toBeGreaterThan(0);
+      for (const args of argSets ?? []) {
+        const out = (value as (...a: unknown[]) => unknown)(...args);
+        expect(
+          typeof out,
+          `${label}: function leaf "${path}" must return a string for args ${JSON.stringify(args)}`,
+        ).toBe('string');
+        expect(
+          (out as string).length,
+          `${label}: function leaf "${path}" returned empty string for args ${JSON.stringify(args)}`,
+        ).toBeGreaterThan(0);
+        // Same trailing-whitespace guard for formatters — applies to
+        // every branch the FN_ARGS table exercises.
+        expect(
+          out,
+          `${label}: function leaf "${path}" returned trailing whitespace for args ${JSON.stringify(args)}`,
+        ).toBe((out as string).trimEnd());
+      }
     } else {
       throw new Error(`${label}: leaf "${path}" has unexpected type ${typeof value}`);
     }

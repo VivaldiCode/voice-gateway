@@ -174,7 +174,7 @@ export const pt: Dictionary = {
     orShortcut: (hotkey) => `ou usa ${hotkey}`,
   },
   connection: {
-    connectedWithLatency: (ms) => (ms != null ? `Ligado (${ms} ms)` : 'Ligado '),
+    connectedWithLatency: (ms) => (ms != null ? `Ligado (${ms} ms)` : 'Ligado'),
     connecting: 'A ligar…',
     connectingAttempt: (n) => `A ligar… (tentativa ${n})`,
     disconnectedClick: 'Sem ligação — clica para tentar ligar',
