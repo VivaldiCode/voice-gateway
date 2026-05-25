@@ -259,7 +259,27 @@ def _log_task_outcome(
     if ws.closed:
         return
     detail = f"{type(err).__name__}: {err}" if str(err).strip() else type(err).__name__
-    asyncio.create_task(send_error(ws, "UNKNOWN", detail, turn_id=turn_id))
+    # The error-frame dispatch is itself a coroutine; wrap it with its own
+    # done-callback so a secondary failure (WS closed mid-write, etc.)
+    # doesn't recreate the exact "task crashes silently" pattern this
+    # function exists to prevent. Reviewer-suggested nit, PR #1 round-12.
+    recovery = asyncio.create_task(send_error(ws, "UNKNOWN", detail, turn_id=turn_id))
+    recovery.add_done_callback(lambda r, tid=turn_id: _log_recovery_outcome(r, tid))
+
+
+def _log_recovery_outcome(task: "asyncio.Task[None]", turn_id: str) -> None:
+    """Inner safety net for the error-frame dispatch fired from
+    _log_task_outcome. Just logs — there's no further fallback to try
+    once the WS itself rejected our error frame."""
+    if task.cancelled():
+        return
+    err = task.exception()
+    if err is not None:
+        log.warning(
+            "recovery error frame failed (turn=%s): %r — nothing more we can do",
+            turn_id,
+            err,
+        )
 
 
 async def send_error(
