@@ -51,7 +51,18 @@ import { fileURLToPath } from 'node:url';
  */
 export function headlessArgs(): readonly string[] {
   if (process.env['VG_E2E_HEADLESS'] !== '1') return [];
-  return ['--headless=new', '--disable-gpu', '--no-sandbox'];
+  // `--use-fake-ui-for-media-stream` auto-grants getUserMedia in headless
+  // mode where Chromium has no permission dialog to fall back on — without
+  // it any spec that opens a mic stream hangs forever. Pair it with
+  // --use-fake-device-for-media-stream (which the rig already adds
+  // per-spec when fakeAudioFile is set) for the WAV-backed audio path.
+  // Reviewer-suggested nit on PR #8 (round 12).
+  return [
+    '--headless=new',
+    '--disable-gpu',
+    '--no-sandbox',
+    '--use-fake-ui-for-media-stream',
+  ];
 }
 
 export function vgTmpdir(): string {
