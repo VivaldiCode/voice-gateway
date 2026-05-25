@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Loader2, Mic, Headphones } from 'lucide-react';
+import { CheckCircle2, Cloud, HardDrive, Loader2, Mic, Headphones } from 'lucide-react';
 import { Button } from './Button';
 import { Logo } from './Logo';
 import { cn } from '../lib/cn';
 import { SUPPORTED_WAKE_WORDS, type WakeWord } from '../../shared/constants';
-import type { ActivationMode } from '../../shared/types';
+import type { ActivationMode, SttProvider, TtsProvider } from '../../shared/types';
 
-type Step = 'url' | 'token' | 'mode' | 'done';
+type Step = 'url' | 'token' | 'mode' | 'providers' | 'done';
 
 interface ProbeState {
   testing: boolean;
@@ -31,6 +31,13 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
   const [token, setToken] = useState('');
   const [mode, setMode] = useState<ActivationMode>('PUSH_TO_TALK');
   const [wakeWord, setWakeWord] = useState<WakeWord>('hey_jarvis');
+  // I6 round-12: user picks providers before reaching "done". Defaults
+  // assume the safest no-extra-deps path for a fresh install — local
+  // Piper is shipped as part of the macOS bundle, local Whisper auto-
+  // installs via Homebrew on first use. The user can revert from
+  // Settings → Voz / Reconhecimento any time.
+  const [ttsProvider, setTtsProvider] = useState<TtsProvider>('piper_local');
+  const [sttProvider, setSttProvider] = useState<SttProvider>('whisper_local');
   const [probe, setProbe] = useState<ProbeState>({ testing: false, result: null });
   const [recentUrls, setRecentUrls] = useState<string[]>([]);
   // We seed the URL field from settings once on mount. Subsequent changes
@@ -82,8 +89,26 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
       } as never,
     });
     setProbe({ testing: false, result: null });
-    setStep('done');
+    // I6 round-12: advance to the providers step (TTS + STT picker)
+    // instead of jumping straight to 'done'. Lets the user pick
+    // cloud vs local with cost/time estimates before they land in
+    // the main view.
+    setStep('providers');
   }, [url, token, mode, wakeWord]);
+
+  // I6 round-12: persist the provider choice + kick off prepare() in
+  // the background so the time-consuming local install (Piper venv,
+  // whisper.cpp via brew, model download) is already in flight when
+  // the user lands in the main view.
+  const handleProvidersConfirm = useCallback(async () => {
+    await window.vg.settings.set({
+      tts: { provider: ttsProvider } as never,
+      stt: { provider: sttProvider } as never,
+    });
+    if (ttsProvider === 'piper_local') void window.vg.tts.prepare();
+    if (sttProvider === 'whisper_local') void window.vg.stt.prepare();
+    setStep('done');
+  }, [ttsProvider, sttProvider]);
 
   const cancelWizard = (): void => {
     // Wipe everything the user typed and return to step 1. Useful on
@@ -132,9 +157,19 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
             saveError={probe.result?.ok === false ? probe.result.message : null}
           />
         )}
+        {step === 'providers' && (
+          <ProvidersStep
+            ttsProvider={ttsProvider}
+            sttProvider={sttProvider}
+            onTtsProvider={setTtsProvider}
+            onSttProvider={setSttProvider}
+            onBack={() => setStep('mode')}
+            onConfirm={handleProvidersConfirm}
+          />
+        )}
         {step === 'done' && <DoneStep onContinue={onComplete} />}
       </main>
-      {(step === 'token' || step === 'mode') && (
+      {(step === 'token' || step === 'mode' || step === 'providers') && (
         <footer className="border-t border-bg-subtle px-8 py-3 text-center">
           <button
             type="button"
@@ -151,13 +186,18 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
 }
 
 function Stepper({ current }: { current: Step }): JSX.Element {
-  const order: Step[] = ['url', 'token', 'mode', 'done'];
+  // I6 round-12: the wizard now has 4 user-facing steps (url, token,
+  // mode, providers) plus the implicit 'done' page. The stepper shows
+  // 4 dots; the "done" page renders without progress bars (it's the
+  // celebration screen).
+  const order: Step[] = ['url', 'token', 'mode', 'providers', 'done'];
   const index = order.indexOf(current);
-  const displayIndex = current === 'done' ? 3 : index + 1;
+  const totalSteps = 4;
+  const displayIndex = current === 'done' ? totalSteps : index + 1;
   return (
     <div className="flex flex-col gap-2 px-8 pt-8" data-testid="wizard-stepper">
       <div className="flex items-center gap-2">
-        {order.slice(0, 3).map((s, i) => (
+        {order.slice(0, totalSteps).map((s, i) => (
           <div
             key={s}
             className={cn(
@@ -173,7 +213,7 @@ function Stepper({ current }: { current: Step }): JSX.Element {
         className="text-right text-[10px] uppercase tracking-wider text-zinc-500"
         data-testid="wizard-step-label"
       >
-        passo {displayIndex} de 3
+        passo {displayIndex} de {totalSteps}
       </p>
     </div>
   );
@@ -454,6 +494,156 @@ function ModeCard({
       <span className="text-lg font-semibold">{title}</span>
       <span className="text-xs uppercase tracking-wider text-accent">{subtitle}</span>
       <span className="text-sm text-zinc-400">{description}</span>
+    </button>
+  );
+}
+
+/**
+ * I6 round-12 — TTS + STT provider picker.
+ *
+ * Two side-by-side cards (cloud vs local) per provider, with the
+ * expected install time/effort surfaced up-front so the user can make
+ * a sensible call. Defaults: Piper local + Whisper local (works offline
+ * without any extra credentials). Cloud providers need API keys the
+ * user enters later in Settings — the wizard just records the
+ * preference here.
+ */
+interface ProvidersStepProps {
+  ttsProvider: TtsProvider;
+  sttProvider: SttProvider;
+  onTtsProvider: (v: TtsProvider) => void;
+  onSttProvider: (v: SttProvider) => void;
+  onBack: () => void;
+  onConfirm: () => void;
+}
+
+function ProvidersStep({
+  ttsProvider,
+  sttProvider,
+  onTtsProvider,
+  onSttProvider,
+  onBack,
+  onConfirm,
+}: ProvidersStepProps): JSX.Element {
+  return (
+    <section
+      className="mx-auto flex max-w-2xl flex-col gap-6"
+      data-testid="wizard-providers"
+    >
+      <header>
+        <h1 className="text-2xl font-semibold">Como queres que o Hermes ouça e fale?</h1>
+        <p className="mt-2 text-sm text-zinc-400">
+          Local é privado e gratuito mas precisa de descarregar modelos.
+          Cloud é instantâneo mas requer chaves API.
+        </p>
+      </header>
+
+      <fieldset className="flex flex-col gap-3" data-testid="wizard-providers-tts">
+        <legend className="text-xs uppercase tracking-wider text-zinc-500">
+          Voz (TTS)
+        </legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ProviderCard
+            icon={<HardDrive className="h-6 w-6" />}
+            title="Piper local"
+            blurb="Voz natural, offline, ~30 MB por voz."
+            timeEstimate="~1 min de download na primeira utilização"
+            active={ttsProvider === 'piper_local'}
+            onClick={() => onTtsProvider('piper_local')}
+            testid="wizard-tts-local"
+          />
+          <ProviderCard
+            icon={<Cloud className="h-6 w-6" />}
+            title="ElevenLabs cloud"
+            blurb="Vozes premium, latência baixa, requer chave API."
+            timeEstimate="instantâneo (depois de adicionares a chave em Definições)"
+            active={ttsProvider === 'elevenlabs'}
+            onClick={() => onTtsProvider('elevenlabs')}
+            testid="wizard-tts-cloud"
+          />
+        </div>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-3" data-testid="wizard-providers-stt">
+        <legend className="text-xs uppercase tracking-wider text-zinc-500">
+          Reconhecimento (STT)
+        </legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ProviderCard
+            icon={<HardDrive className="h-6 w-6" />}
+            title="Whisper local"
+            blurb="100% offline, instala-se via Homebrew."
+            timeEstimate="~2–5 min na primeira execução (brew install + modelo base)"
+            active={sttProvider === 'whisper_local'}
+            onClick={() => onSttProvider('whisper_local')}
+            testid="wizard-stt-local"
+          />
+          <ProviderCard
+            icon={<Cloud className="h-6 w-6" />}
+            title="OpenAI Whisper cloud"
+            blurb="Pago por uso, requer chave API."
+            timeEstimate="instantâneo (depois de adicionares a chave em Definições)"
+            active={sttProvider === 'openai_whisper'}
+            onClick={() => onSttProvider('openai_whisper')}
+            testid="wizard-stt-cloud"
+          />
+        </div>
+      </fieldset>
+
+      <div className="flex justify-between gap-2">
+        <Button variant="ghost" onClick={onBack}>
+          Voltar
+        </Button>
+        <Button
+          size="lg"
+          onClick={onConfirm}
+          data-testid="wizard-providers-confirm"
+        >
+          Continuar
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+interface ProviderCardProps {
+  icon: JSX.Element;
+  title: string;
+  blurb: string;
+  timeEstimate: string;
+  active: boolean;
+  onClick: () => void;
+  testid: string;
+}
+
+function ProviderCard({
+  icon,
+  title,
+  blurb,
+  timeEstimate,
+  active,
+  onClick,
+  testid,
+}: ProviderCardProps): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={testid}
+      className={cn(
+        'flex flex-col gap-2 rounded-2xl border bg-bg-panel p-4 text-left transition',
+        active
+          ? 'border-accent ring-2 ring-accent/40'
+          : 'border-bg-subtle hover:border-zinc-600',
+      )}
+    >
+      <span className="text-accent">{icon}</span>
+      <span className="font-semibold text-white">{title}</span>
+      <span className="text-xs text-zinc-400">{blurb}</span>
+      <span className="text-[10px] uppercase tracking-wider text-accent-glow/80">
+        {timeEstimate}
+      </span>
     </button>
   );
 }
