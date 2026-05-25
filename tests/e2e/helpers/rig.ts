@@ -239,6 +239,11 @@ export async function launchUnpaired(
   // flows can still observe state events after pairing completes.
   await waitForVgReady(mainWindow);
   await instrumentTtsCounter(mainWindow);
+  // Round-12 follow-up to issue #18: headless Chromium denies the
+  // clipboard-write permission. Patch every page so renderer code that
+  // calls navigator.clipboard.writeText doesn't surface as a
+  // pageerror that masks the real test outcome.
+  await grantClipboardWrite(mainWindow);
 
   let disposed = false;
   const dispose = async (): Promise<void> => {
@@ -327,8 +332,12 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
   // was missed and waitForState timed out with empty stateLog. Wiring
   // listeners during launch removes the window entirely. Specs that
   // still call instrumentTtsCounter() get a no-op (it's idempotent).
+  // (waitForState ALSO polls the renderer's DOM-rendered data-state as
+  // a fallback — see waitForState doc.)
   await waitForVgReady(mainWindow);
   await instrumentTtsCounter(mainWindow);
+  // Round-12 follow-up to issue #18: see grantClipboardWrite doc.
+  await grantClipboardWrite(mainWindow);
 
   let disposed = false;
   const dispose = async (): Promise<void> => {
@@ -465,6 +474,69 @@ export async function instrumentTtsCounter(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Monkey-patch `navigator.clipboard.writeText` in the renderer so
+ * `Clipboard.writeText("...")` calls always resolve, even on macos-latest
+ * headless Chromium where the clipboard-write permission is denied by
+ * default (no user-gesture, no permissions dialog).
+ *
+ * Specs that need to ASSERT on the copied value can read
+ * `window.__vg_last_clip` after the click; specs that just need the
+ * click handler not to crash get a silent swallow.
+ *
+ * Called automatically from `launchPackaged` / `launchUnpaired` so every
+ * spec is protected — round-12 follow-up to issue #18, where three
+ * specs (Cmd+S transcript export, "copiar" button, "Copiar
+ * diagnóstico" toast) intermittently failed with
+ * `[main pageerror] Failed to execute 'writeText' on 'Clipboard': Write
+ * permission denied.` on the GH macos-latest runner. The renderer's
+ * error toast was treating the pageerror as a test failure even though
+ * the user-facing copy still worked locally.
+ *
+ * Idempotent — second call is a no-op.
+ */
+export async function grantClipboardWrite(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    interface W {
+      __vg_clipboard_patched?: boolean;
+      __vg_last_clip?: string | null;
+      navigator: { clipboard?: { writeText?: (s: string) => Promise<void> } };
+    }
+    const w = globalThis as unknown as W;
+    if (w.__vg_clipboard_patched) return;
+    w.__vg_clipboard_patched = true;
+    w.__vg_last_clip = null;
+    // navigator.clipboard may be undefined when the page hasn't fully
+    // hydrated (rare, but possible during a reload). Guard against it
+    // so the helper itself doesn't throw and break the test setup.
+    if (!w.navigator.clipboard) {
+      w.navigator.clipboard = { writeText: async () => undefined };
+    }
+    const orig = w.navigator.clipboard.writeText?.bind(w.navigator.clipboard);
+    w.navigator.clipboard.writeText = async (s: string): Promise<void> => {
+      w.__vg_last_clip = s;
+      if (!orig) return;
+      try {
+        await orig(s);
+      } catch {
+        // Headless Chromium denies the write — swallow so the renderer's
+        // try/catch doesn't surface as a pageerror.
+      }
+    };
+  });
+}
+
+/**
+ * Read whatever was most recently written via the patched
+ * `navigator.clipboard.writeText`. Returns null if nothing has been
+ * written yet (or `grantClipboardWrite` wasn't called).
+ */
+export async function readLastClipboard(page: Page): Promise<string | null> {
+  return await page.evaluate(
+    () => (globalThis as unknown as { __vg_last_clip: string | null }).__vg_last_clip,
+  );
+}
+
 export interface VgStats {
   chunks: number;
   bytes: number;
@@ -538,10 +610,26 @@ export async function holdPtt(page: Page, ms: number): Promise<void> {
 }
 
 /**
- * Wait until the last `state` event recorded by `instrumentTtsCounter`
- * matches one of the given states. Returns the matching state. Throws if
- * the timeout expires without a match — surfaces what we DID see for
- * actionable diagnostics.
+ * Wait until either the last `state` event recorded by `instrumentTtsCounter`
+ * OR the renderer's own DOM-rendered state (data-testid="state-orb"
+ * data-state="...") matches one of the given states.
+ *
+ * Why two sources? The state-log path depends on the auto-instrument
+ * listener catching the IPC `state` event. On CI macos-latest the FSM
+ * can transition (e.g. fake-wake LISTENING_WAKE→CAPTURING fires at
+ * ~1.5 s post-spawn) BEFORE the auto-instrument listener attached:
+ * preload exposes `vg.conversation` shortly after `domcontentloaded`,
+ * but `webContents.send` is fire-and-forget — any state event sent
+ * during the small (T_domcontentloaded, T_listener_attached) window is
+ * lost to the auto-instrument array. The renderer's own
+ * `useConversation` hook is mounted INSIDE the React tree and catches
+ * those same events into React state, which is then rendered on the
+ * StateOrb's `data-state` attribute. The DOM reflects the current
+ * FSM state regardless of when our test-side listener attached.
+ *
+ * Returns the matching state. Throws if neither source surfaces a
+ * match within the timeout — error message includes BOTH the recent
+ * state log and the current DOM-rendered state for diagnostics.
  */
 export async function waitForState(
   page: Page,
@@ -556,10 +644,15 @@ export async function waitForState(
   const desiredSet = new Set(desired);
   const start = Date.now();
   let last: string = '';
+  let domLast: string = '';
   while (Date.now() - start < timeoutMs) {
     const stats = await readVgStats(page);
     last = stats.stateLog.at(-1)?.state ?? '';
     if (desiredSet.has(last)) return last;
+    // Fallback: read the renderer's DOM-rendered FSM state. Catches the
+    // race where the auto-instrument missed an early transition.
+    domLast = await readRendererState(page);
+    if (desiredSet.has(domLast)) return domLast;
     await page.waitForTimeout(100);
   }
   const recent = (await readVgStats(page)).stateLog
@@ -567,8 +660,39 @@ export async function waitForState(
     .map((s) => s.state)
     .join(' → ');
   throw new Error(
-    `waitForState timed out after ${timeoutMs} ms — wanted [${desired.join(', ')}], last=${last}, recent=${recent}`,
+    `waitForState timed out after ${timeoutMs} ms — wanted [${desired.join(', ')}], last=${last}, dom=${domLast}, recent=${recent}`,
   );
+}
+
+/**
+ * Read the current FSM state from the renderer's StateOrb component
+ * (`data-testid="state-orb"` → `data-state="..."`). Returns '' if the
+ * orb isn't on the page yet (PairingWizard mode, mid-reload, etc.).
+ *
+ * This is the renderer's React state, which is the most reliable
+ * signal of "what the FSM currently thinks it is" — the
+ * `useConversation` hook subscribes during React mount, BEFORE any
+ * post-domcontentloaded test code can attach listeners, so it
+ * doesn't suffer the same attach-timing race that the auto-instrument
+ * array does.
+ */
+export async function readRendererState(page: Page): Promise<string> {
+  try {
+    return await page.evaluate(() => {
+      // tsconfig.node.json doesn't include the DOM lib — `document` only
+      // exists at runtime inside the page context. Cast through
+      // globalThis so the typechecker doesn't blow up while the runtime
+      // behaviour is unchanged.
+      const w = globalThis as unknown as {
+        document: { querySelector: (sel: string) => { getAttribute: (k: string) => string | null } | null };
+      };
+      const el = w.document.querySelector('[data-testid="state-orb"]');
+      return el?.getAttribute('data-state') ?? '';
+    });
+  } catch {
+    // Page navigated mid-eval or context destroyed — caller will retry.
+    return '';
+  }
 }
 
 /**

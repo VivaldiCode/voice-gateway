@@ -180,6 +180,23 @@ test.describe('UX round-10 — Avançado, wizard suggestions, VU meter, notifica
     const driver = await ConversationDriver.attach(mainWindow);
     await driver.runTurn({ holdMs: 200, until: ['IDLE'] });
 
+    // The notification fires from a React useEffect watching conv.state +
+    // conv.transcript. By the time the FSM reaches IDLE the effect has
+    // been scheduled but may not have run yet — poll the spy array so
+    // the assertion doesn't race the render. (Round-12 follow-up: this
+    // was a flaky-passing-on-retry-1 spec on macos-latest headless.)
+    await expect
+      .poll(
+        async () =>
+          await mainWindow.evaluate(
+            () =>
+              (globalThis as unknown as { __vg_notifications: Array<{ title: string; body: string }> })
+                .__vg_notifications.length,
+          ),
+        { timeout: 5_000 },
+      )
+      .toBeGreaterThan(0);
+
     const seen = await mainWindow.evaluate(
       () => (globalThis as unknown as { __vg_notifications: Array<{ title: string; body: string }> }).__vg_notifications,
     );

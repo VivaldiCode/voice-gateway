@@ -175,7 +175,12 @@ test.describe('UX round-11 — capture timer, retry button, pre-flight, export, 
       });
       const driver = await ConversationDriver.attach(mainWindow);
       await driver.runTurn({ holdMs: 200, until: ['IDLE'] });
-      await expect(mainWindow.getByTestId('transcript-count')).toContainText(/2 mensagens/);
+      // Wait long enough for the renderer's React state to absorb the
+      // user + assistant transcript events post-IDLE — same DOM-render
+      // lag described in waitForState's doc. 10 s ceiling for CI.
+      await expect(mainWindow.getByTestId('transcript-count')).toContainText(/2 mensagens/, {
+        timeout: 10_000,
+      });
 
       // Focus the renderer + press Cmd+S — main writes the file because
       // VG_E2E_EXPORT_TARGET is set, no OS dialog opens.
@@ -233,7 +238,11 @@ test.describe('UX round-11 — capture timer, retry button, pre-flight, export, 
     });
     const driver = await ConversationDriver.attach(mainWindow);
     await driver.runTurn({ holdMs: 200, until: ['IDLE'] });
-    await expect(mainWindow.getByTestId('transcript-count')).toContainText(/2 mensagens/);
+    // 10 s ceiling for the post-IDLE transcript-count render — see the
+    // Cmd+S spec above for the same lag explanation.
+    await expect(mainWindow.getByTestId('transcript-count')).toContainText(/2 mensagens/, {
+      timeout: 10_000,
+    });
     // Wait past the 600 ms debounce so the persistence write lands.
     await mainWindow.waitForTimeout(900);
 
