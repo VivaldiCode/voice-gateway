@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Voice Gateway — Hermes Voice Bridge installer.
+# Voice Gateway — agent bridge installer.
+#
+# This script installs the WebSocket bridge that the Voice Gateway desktop
+# app talks to. Today it only knows how to install the Hermes adapter (the
+# default), but the --agent=<name> flag is the entry point that future
+# agents (claude-code, chatgpt, cursor, openclaw, …) will hook into. See
+# docs/Agents.md for the architectural contract.
+#
 # Idempotent: re-running upgrades the package and preserves the existing token.
 
 set -euo pipefail
@@ -7,6 +14,46 @@ set -euo pipefail
 # Canonical raw URL for piped installs (`curl ... | bash`). Used to re-fetch
 # this script under sudo when we cannot exec ourselves directly.
 INSTALL_SCRIPT_URL="${INSTALL_SCRIPT_URL:-https://raw.githubusercontent.com/VivaldiCode/voice-gateway/main/server/install.sh}"
+
+# ---------- agent dispatcher (round-12 I4) ----------
+# Default agent. Override with `--agent=<name>` or `VG_AGENT=<name>`.
+VG_AGENT="${VG_AGENT:-hermes}"
+# Agents the installer knows about. Unimplemented entries fail with a
+# clear pointer to docs/Agents.md rather than producing a broken install.
+VG_AGENTS_IMPLEMENTED="hermes"
+VG_AGENTS_PLANNED="claude-code chatgpt cursor openclaw"
+
+# Strip --agent=... out of "$@" before the rest of the script runs (it
+# was always positional-arg-free, so we can parse here without worrying
+# about ordering). Any other --flag we don't recognise is passed through
+# untouched for forward compatibility.
+__VG_PASSTHRU=()
+for arg in "$@"; do
+  case "$arg" in
+    --agent=*) VG_AGENT="${arg#--agent=}" ;;
+    --agent) ;;  # bare --agent without value is invalid — we'll error below
+    *) __VG_PASSTHRU+=("$arg") ;;
+  esac
+done
+set -- "${__VG_PASSTHRU[@]:-}"
+
+# Validate VG_AGENT against the known set.
+__agent_is() { [[ " ${VG_AGENTS_IMPLEMENTED} " == *" $1 "* ]]; }
+__agent_planned() { [[ " ${VG_AGENTS_PLANNED} " == *" $1 "* ]]; }
+
+if ! __agent_is "$VG_AGENT"; then
+  if __agent_planned "$VG_AGENT"; then
+    printf '\e[33m!\e[0m %s\n' "Agent '${VG_AGENT}' is on the roadmap but not yet implemented."
+    printf '  See https://github.com/VivaldiCode/voice-gateway/blob/main/docs/Agents.md\n'
+    printf '  for the contract a contributor would need to satisfy.\n'
+    exit 2
+  fi
+  printf '\e[31m✗\e[0m %s\n' "Unknown --agent=${VG_AGENT}"
+  printf '  Supported now:    %s\n' "$VG_AGENTS_IMPLEMENTED"
+  printf '  Planned (vetted): %s\n' "$VG_AGENTS_PLANNED"
+  printf '  See docs/Agents.md\n'
+  exit 2
+fi
 
 # ---------- pretty printing ----------
 BOLD=$'\e[1m'
