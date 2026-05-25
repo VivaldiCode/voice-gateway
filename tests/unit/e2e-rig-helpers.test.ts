@@ -17,7 +17,7 @@
  * Playwright deps, so it loads cleanly in a node test environment.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ciTimeout } from '../../tests/e2e/helpers/rig';
+import { ciTimeout } from '../e2e/helpers/rig';
 
 describe('ciTimeout (e2e rig)', () => {
   const originalCI = process.env['CI'];
