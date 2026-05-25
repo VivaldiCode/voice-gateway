@@ -139,6 +139,25 @@ export interface ConnectionSettings {
   draftUrl: string;
 }
 
+/**
+ * Per-turn entry persisted so the user doesn't lose context across an
+ * app restart. Only the visible role + text are stored — we explicitly
+ * do NOT persist any audio payload (the TTS chunks would balloon the
+ * settings file and there's no use case for replaying them).
+ */
+export interface PersistedTranscriptLine {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  /** Unix-ms timestamp the line was first appended. Optional for v5+. */
+  ts?: number;
+}
+
+export interface TranscriptHistorySettings {
+  /** Newest-last list. Capped at MAX_PERSISTED_TRANSCRIPT_LINES. */
+  recent: PersistedTranscriptLine[];
+}
+
 export interface Settings {
   pairing: PairingInfo | null;
   activation: ActivationSettings;
@@ -148,6 +167,8 @@ export interface Settings {
   ui: UiSettings;
   /** Pairing draft + recent-URL history. v4 schema. */
   connection: ConnectionSettings;
+  /** Persisted transcript window. v5 schema. */
+  transcript: TranscriptHistorySettings;
   /** Bumped when the schema changes. Used by the store for migrations. */
   schemaVersion: number;
 }

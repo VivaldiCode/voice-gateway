@@ -114,6 +114,13 @@ interface VgApi {
     /** Reveal the electron-log file in the OS file manager. */
     revealFile: () => Promise<{ ok: boolean; path: string; message?: string }>;
   };
+  transcript: {
+    export: (payload: {
+      text: string;
+      defaultFileName?: string;
+      cancelDialog?: boolean;
+    }) => Promise<{ ok: boolean; path?: string; message?: string; canceled?: boolean }>;
+  };
   wake: {
     testStart: (req: {
       mode: 'openww' | 'phrase';

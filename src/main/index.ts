@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, session, shell, systemPreferences, type Tray, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences, type Tray, screen } from 'electron';
+import { promises as fsPromises } from 'node:fs';
 import log from 'electron-log/main';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -574,6 +575,68 @@ ipcMain.handle(IPC.LOG_REVEAL_FILE, async () => {
     return { ok: false as const, path, message: (err as Error).message };
   }
 });
+
+// Renderer hands us the formatted transcript text; we let the user pick a
+// destination via the native Save dialog, then write it. The render-side
+// formatting (Tu:/Hermes: prefixes) stays in the renderer so we don't
+// have to round-trip the transcript model into main.
+ipcMain.handle(
+  IPC.TRANSCRIPT_EXPORT,
+  async (
+    _e,
+    payload: { text: string; defaultFileName?: string; cancelDialog?: boolean },
+  ): Promise<{ ok: boolean; path?: string; message?: string; canceled?: boolean }> => {
+    // The cancelDialog branch is only used by E2E: bypass the OS dialog
+    // and just confirm the IPC + writer work end-to-end against a tmp
+    // path the renderer can clean up. Production callers never set it.
+    if (payload.cancelDialog) {
+      return { ok: false, canceled: true };
+    }
+    // Alternate E2E hook: if VG_E2E_EXPORT_TARGET is set in main's env,
+    // skip the OS dialog entirely and write straight to that path. Keeps
+    // Playwright fast + deterministic without needing the renderer to
+    // know about the flag.
+    const envTarget = process.env['VG_E2E_EXPORT_TARGET'];
+    if (envTarget && envTarget.trim().length > 0) {
+      try {
+        await fsPromises.writeFile(envTarget, payload.text, 'utf-8');
+        log.info('[VG] transcript exported (E2E env)', { path: envTarget });
+        return { ok: true, path: envTarget };
+      } catch (err) {
+        log.warn('[VG] transcript export (E2E env) failed', err);
+        return { ok: false, message: (err as Error).message };
+      }
+    }
+    const owner = getMainWindow();
+    const defaults = payload.defaultFileName ?? `voice-gateway-${Date.now()}.txt`;
+    let result: Awaited<ReturnType<typeof dialog.showSaveDialog>>;
+    try {
+      result = owner
+        ? await dialog.showSaveDialog(owner, {
+            defaultPath: defaults,
+            filters: [{ name: 'Texto', extensions: ['txt', 'md'] }],
+          })
+        : await dialog.showSaveDialog({
+            defaultPath: defaults,
+            filters: [{ name: 'Texto', extensions: ['txt', 'md'] }],
+          });
+    } catch (err) {
+      log.warn('[VG] transcript export: dialog threw', err);
+      return { ok: false, message: (err as Error).message };
+    }
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true };
+    }
+    try {
+      await fsPromises.writeFile(result.filePath, payload.text, 'utf-8');
+      log.info('[VG] transcript exported', { path: result.filePath, bytes: payload.text.length });
+      return { ok: true, path: result.filePath };
+    } catch (err) {
+      log.warn('[VG] transcript export: write failed', err);
+      return { ok: false, message: (err as Error).message };
+    }
+  },
+);
 
 let lastSettingsSnapshot = JSON.stringify(settings.get());
 let lastAutoLaunch = settings.get().ui.autoLaunch;

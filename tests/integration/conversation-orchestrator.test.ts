@@ -449,4 +449,65 @@ describe('ConversationOrchestrator', () => {
     await new Promise((r) => setImmediate(r));
     expect(client.sent.some((m) => m.type === 'transcript')).toBe(true);
   });
+
+  it('server response_text with empty final text skips TTS and ends the turn', async () => {
+    // Covers the `if (!text.trim())` early-return in speak() — the server
+    // signalled "I have nothing meaningful to say" so we must hop straight
+    // to RESPONSE_END without spawning the TTS pipeline.
+    const { o, client, stt, tts } = makeOrchestrator();
+    stt.result = { text: 'pergunta' };
+    o.pttPress();
+    o.pushAudio(Buffer.from([1, 2, 3]));
+    o.pttRelease();
+    // Wait for STT → start_turn → end_turn round-trip.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    const endTurn = client.sent.find((m) => m.type === 'end_turn');
+    const turnId = (endTurn?.payload as { turn_id: string }).turn_id;
+    // Simulate the bridge replying with a final but empty response_text.
+    (client as unknown as EventEmitter).emit('response_text', {
+      type: 'response_text',
+      turn_id: turnId,
+      text: '   ', // whitespace-only counts as empty after trim()
+      final: true,
+    });
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(tts.spoken).toEqual([]); // speak() bailed out before invoking adapter
+    expect(o.getState().state).toBe('IDLE');
+  });
+
+  it('tts.stop() throwing during error cleanup does not propagate (best-effort)', async () => {
+    // Cover the `try { this.tts.stop(); } catch { /* ignore */ }` cleanup
+    // path inside the speak() error handler. If the cleanup itself blows
+    // up the orchestrator must still emit the error + transition out of
+    // SPEAKING instead of leaking the exception to the caller.
+    const { o, client, stt, tts } = makeOrchestrator({ ttsTimeoutMs: 50 });
+    stt.result = { text: 'q' };
+    // Make tts.speak hang so the timeout fires AND tts.stop() throws.
+    tts.speak = async () =>
+      new Promise(() => undefined) as unknown as Promise<void>;
+    tts.stop = () => {
+      throw new Error('stop blew up');
+    };
+    o.on('error', () => undefined); // suppress EventEmitter unhandled throw
+    o.pttPress();
+    o.pushAudio(Buffer.from([1, 2, 3]));
+    o.pttRelease();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    const endTurn = client.sent.find((m) => m.type === 'end_turn');
+    const turnId = (endTurn?.payload as { turn_id: string }).turn_id;
+    (client as unknown as EventEmitter).emit('response_text', {
+      type: 'response_text',
+      turn_id: turnId,
+      text: 'hello',
+      final: true,
+    });
+    // Wait past the TTS timeout so the catch block runs.
+    await new Promise((r) => setTimeout(r, 100));
+    // Either ERROR or IDLE is acceptable as the post-state; what matters
+    // is that the orchestrator didn't crash and finished the turn.
+    expect(['IDLE', 'ERROR']).toContain(o.getState().state);
+  });
 });

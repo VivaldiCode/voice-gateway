@@ -71,7 +71,8 @@ describe('settings-store — schema migration', () => {
     expect(s.ui.autoLaunch).toBe(false);
     expect(s.connection.recentUrls).toEqual([]);
     expect(s.connection.draftUrl).toBe('');
-    expect(s.schemaVersion).toBe(4);
+    expect(s.transcript.recent).toEqual([]);
+    expect(s.schemaVersion).toBe(5);
   });
 
   it('migrates a v1 file (no wakeMode/wakePhrase) into the current shape', () => {
@@ -122,11 +123,12 @@ describe('settings-store — schema migration', () => {
     expect(s.audio.outputMuted).toBe(false);
     expect(s.ui.autoLaunch).toBe(false);
     expect(s.connection).toEqual({ recentUrls: [], draftUrl: '' });
-    expect(s.schemaVersion).toBe(4);
+    expect(s.transcript).toEqual({ recent: [] });
+    expect(s.schemaVersion).toBe(5);
 
     // The migration is persisted back to disk so the next boot is fast.
     const onDisk = JSON.parse(readFileSync(storeFile(cwd), 'utf-8'));
-    expect(onDisk.settings.schemaVersion).toBe(4);
+    expect(onDisk.settings.schemaVersion).toBe(5);
     expect(onDisk.settings.activation.wakeMode).toBe('openww');
   });
 
@@ -146,17 +148,18 @@ describe('settings-store — schema migration', () => {
     const s = store.get();
     expect(s.audio.inputDeviceId).toBe('mic-x');
     expect(s.audio.outputMuted).toBe(false);
-    expect(s.schemaVersion).toBe(4);
+    expect(s.schemaVersion).toBe(5);
   });
 
-  it('migrates a v3 file (no ui.autoLaunch / no connection) into v4 with the new defaults', () => {
+  it('migrates a v3 file (no ui.autoLaunch / no connection) into v5 with the new defaults', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v3-'));
     const v3 = {
       settings: {
         ...defaultSettings(),
-        // strip the v4 surfaces so the on-disk shape matches what v3 wrote
+        // strip the v4+ surfaces so the on-disk shape matches what v3 wrote
         ui: { language: 'pt', theme: 'dark', startMinimized: false } as unknown,
         connection: undefined as unknown,
+        transcript: undefined as unknown,
         schemaVersion: 3,
       },
     };
@@ -167,7 +170,42 @@ describe('settings-store — schema migration', () => {
     expect(s.ui.autoLaunch).toBe(false);
     expect(s.connection.recentUrls).toEqual([]);
     expect(s.connection.draftUrl).toBe('');
-    expect(s.schemaVersion).toBe(4);
+    expect(s.transcript.recent).toEqual([]);
+    expect(s.schemaVersion).toBe(5);
+  });
+
+  it('migrates a v4 file (no transcript) into v5 with empty recent', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v4-'));
+    const v4 = {
+      settings: {
+        ...defaultSettings(),
+        transcript: undefined as unknown,
+        schemaVersion: 4,
+      },
+    };
+    writeFileSync(storeFile(cwd), JSON.stringify(v4));
+    const store = createSettingsStore({ cwd });
+    const s = store.get();
+    expect(s.transcript.recent).toEqual([]);
+    expect(s.schemaVersion).toBe(5);
+  });
+
+  it('round-trips persisted transcript lines through set() + reload', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-transcript-'));
+    const first = createSettingsStore({ cwd });
+    first.set({
+      transcript: {
+        recent: [
+          { id: '1-u', role: 'user', text: 'olá' },
+          { id: '1-a', role: 'assistant', text: 'olá tu' },
+        ],
+      },
+    });
+    const second = createSettingsStore({ cwd });
+    expect(second.get().transcript.recent).toEqual([
+      { id: '1-u', role: 'user', text: 'olá' },
+      { id: '1-a', role: 'assistant', text: 'olá tu' },
+    ]);
   });
 
   it('leaves a current-schema file untouched (no migration roundtrip)', () => {
@@ -202,7 +240,7 @@ describe('settings-store — schema migration', () => {
     expect(store.get().pairing).not.toBeNull();
     const after = store.reset();
     expect(after.pairing).toBeNull();
-    expect(after.schemaVersion).toBe(4);
+    expect(after.schemaVersion).toBe(5);
   });
 
   it('onChange listeners fire on set() and unregister cleanly', () => {

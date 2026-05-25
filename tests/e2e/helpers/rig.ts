@@ -115,7 +115,8 @@ export async function writeSeedSettings(
         audio: { inputDeviceId: null, outputDeviceId: null, outputMuted: false },
         ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false },
         connection: { recentUrls: [], draftUrl: '' },
-        schemaVersion: 4,
+        transcript: { recent: [] },
+        schemaVersion: 5,
       },
     }),
   );

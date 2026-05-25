@@ -271,6 +271,39 @@ describe('state-machine — invariants', () => {
     expect(reduce(capturing, { type: 'WAKE_DETECTED' }, env)).toBe(capturing);
   });
 
+  it('inapplicable events in THINKING are no-ops', () => {
+    const env = makeEnv();
+    // Drive: IDLE → CAPTURING → STREAMING → THINKING.
+    const capturing = reduce(initialContext(), { type: 'PTT_PRESS' }, env);
+    const streaming = reduce(capturing, { type: 'PTT_RELEASE' }, env);
+    const thinking = reduce(streaming, { type: 'TRANSCRIPT_FINAL', text: 'oi' }, env);
+    expect(thinking.state).toBe('THINKING');
+    // Events the FSM should ignore while in THINKING.
+    expect(reduce(thinking, { type: 'PTT_PRESS' }, env)).toBe(thinking);
+    expect(reduce(thinking, { type: 'PTT_RELEASE' }, env)).toBe(thinking);
+    expect(reduce(thinking, { type: 'VAD_SILENCE' }, env)).toBe(thinking);
+    expect(reduce(thinking, { type: 'WAKE_DETECTED' }, env)).toBe(thinking);
+    expect(reduce(thinking, { type: 'TRANSCRIPT_FINAL', text: 'late' }, env)).toBe(thinking);
+  });
+
+  it('inapplicable events in SPEAKING are no-ops (non-barge USER_INTERRUPT etc.)', () => {
+    const env = makeEnv();
+    // Drive into SPEAKING.
+    const capturing = reduce(initialContext(), { type: 'PTT_PRESS' }, env);
+    const streaming = reduce(capturing, { type: 'PTT_RELEASE' }, env);
+    const thinking = reduce(streaming, { type: 'TRANSCRIPT_FINAL', text: 'oi' }, env);
+    const speaking = reduce(thinking, { type: 'RESPONSE_AUDIO_START' }, env);
+    expect(speaking.state).toBe('SPEAKING');
+    // user_cancel during SPEAKING is silently ignored — the user-facing
+    // contract is "let the assistant finish, only barge_in interrupts".
+    expect(
+      reduce(speaking, { type: 'USER_INTERRUPT', reason: 'cancel' }, env),
+    ).toBe(speaking);
+    expect(reduce(speaking, { type: 'VAD_SILENCE' }, env)).toBe(speaking);
+    expect(reduce(speaking, { type: 'TRANSCRIPT_FINAL', text: 'late' }, env)).toBe(speaking);
+    expect(reduce(speaking, { type: 'WAKE_DETECTED' }, env)).toBe(speaking);
+  });
+
   it('isCapturing / isBusy helpers reflect state', () => {
     const env = makeEnv();
     expect(isCapturing(initialContext())).toBe(false);

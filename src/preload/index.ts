@@ -135,6 +135,17 @@ const api = {
     revealFile: (): Promise<{ ok: boolean; path: string; message?: string }> =>
       ipcRenderer.invoke(IPC.LOG_REVEAL_FILE),
   },
+
+  transcript: {
+    /**
+     * Hand the formatted transcript to main for a Save-dialog-driven export.
+     * Pass `cancelDialog: true` from E2E to bypass the OS prompt.
+     */
+    export: (
+      payload: { text: string; defaultFileName?: string; cancelDialog?: boolean },
+    ): Promise<{ ok: boolean; path?: string; message?: string; canceled?: boolean }> =>
+      ipcRenderer.invoke(IPC.TRANSCRIPT_EXPORT, payload),
+  },
 } as const;
 
 contextBridge.exposeInMainWorld('vg', api);

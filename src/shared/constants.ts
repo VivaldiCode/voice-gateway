@@ -36,6 +36,13 @@ export const DEFAULT_GLOBAL_HOTKEY_OTHER = 'Control+Shift+H';
  */
 export const MAX_RECENT_BRIDGE_URLS = 3;
 
+/**
+ * How many transcript lines to persist to settings between launches.
+ * Sized so the settings file stays small even for chatty users — at
+ * ~200 bytes per line that's ~4 KB.
+ */
+export const MAX_PERSISTED_TRANSCRIPT_LINES = 20;
+
 export const SUPPORTED_WAKE_WORDS = [
   'hey_jarvis',
   'alexa',
@@ -109,6 +116,10 @@ export const IPC = {
   /** Renderer asks main to surface the electron-log file in Finder/Explorer.
    *  Returns the absolute path so the renderer can also display it. */
   LOG_REVEAL_FILE: 'vg:log:reveal-file',
+  /** Renderer hands the formatted transcript text to main; main opens a
+   *  Save dialog and writes it. Returns { ok, path? } so the renderer can
+   *  show a quick confirmation toast. */
+  TRANSCRIPT_EXPORT: 'vg:transcript:export',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

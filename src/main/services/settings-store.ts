@@ -8,10 +8,11 @@ import {
 } from '@shared/constants';
 import type { Settings } from '@shared/types';
 
-// v4: added ui.autoLaunch + connection.{recentUrls,draftUrl}. v3 added
+// v5: added transcript.recent (persisted conversation window). v4 added
+// ui.autoLaunch + connection.{recentUrls,draftUrl}. v3 added
 // audio.outputMuted. v2 added activation.wakeMode + activation.wakePhrase.
 // Old configs are silently merged with the defaults on first boot.
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function defaultSettings(): Settings {
   const isMac = process.platform === 'darwin';
@@ -45,6 +46,7 @@ export function defaultSettings(): Settings {
     audio: { inputDeviceId: null, outputDeviceId: null, outputMuted: false },
     ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false },
     connection: { recentUrls: [], draftUrl: '' },
+    transcript: { recent: [] },
     schemaVersion: SCHEMA_VERSION,
   };
 }

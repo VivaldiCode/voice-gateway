@@ -67,6 +67,10 @@ export function useConversation(): ConversationApi {
   const [outputDeviceId, setOutputDeviceId] = useState<string | null>(null);
   const [outputMuted, setOutputMutedState] = useState<boolean>(false);
 
+  // We seed the transcript with whatever persisted from the last session
+  // exactly ONCE on mount. Subsequent settings.onChange events should not
+  // re-seed (the user may have already cleared things mid-session).
+  const transcriptSeededRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
     void window.vg.settings.get().then((s) => {
@@ -74,6 +78,15 @@ export function useConversation(): ConversationApi {
       setInputDeviceId(s.audio.inputDeviceId ?? null);
       setOutputDeviceId(s.audio.outputDeviceId ?? null);
       setOutputMutedState(Boolean(s.audio.outputMuted));
+      if (!transcriptSeededRef.current) {
+        transcriptSeededRef.current = true;
+        const persisted = s.transcript?.recent ?? [];
+        if (persisted.length > 0) {
+          setTranscript(
+            persisted.map((p) => ({ id: p.id, role: p.role, text: p.text })),
+          );
+        }
+      }
     });
     const off = window.vg.settings.onChange((s) => {
       setInputDeviceId(s.audio.inputDeviceId ?? null);
@@ -85,6 +98,32 @@ export function useConversation(): ConversationApi {
       off();
     };
   }, []);
+
+  // Debounced persistence of the most recent transcript lines so a crash
+  // or restart doesn't wipe the conversation. We only persist the last
+  // MAX_PERSISTED_TRANSCRIPT_LINES — settings should stay small. The
+  // 600 ms debounce avoids a write per chunk during fast streaming.
+  const lastPersistedRef = useRef<string>('[]');
+  useEffect(() => {
+    if (!transcriptSeededRef.current) return;
+    const handle = (globalThis as unknown as {
+      setTimeout: (cb: () => void, ms: number) => number;
+      clearTimeout: (h: number) => void;
+    }).setTimeout(() => {
+      const tail = transcript.slice(-20).map((l) => ({
+        id: l.id,
+        role: l.role,
+        text: l.text,
+      }));
+      const serialised = JSON.stringify(tail);
+      if (serialised === lastPersistedRef.current) return;
+      lastPersistedRef.current = serialised;
+      void window.vg.settings.set({ transcript: { recent: tail } });
+    }, 600);
+    return () => {
+      (globalThis as unknown as { clearTimeout: (h: number) => void }).clearTimeout(handle);
+    };
+  }, [transcript]);
 
   const playback = useMemo(() => new AudioPlayback(), []);
   // The TTS chunk handler is registered once below; it needs a *live* read
@@ -240,7 +279,11 @@ export function useConversation(): ConversationApi {
     cancel: () => window.vg.conversation.cancel(),
     bargeIn: () => window.vg.conversation.bargeIn(),
     dismissError: () => setError(null),
-    clearTranscript: () => setTranscript([]),
+    clearTranscript: () => {
+      setTranscript([]);
+      lastPersistedRef.current = '[]';
+      void window.vg.settings.set({ transcript: { recent: [] } });
+    },
     outputMuted,
     setOutputMuted: (m: boolean) => {
       // Optimistic local update — the settings.onChange listener will

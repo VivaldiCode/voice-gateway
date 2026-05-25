@@ -4,6 +4,7 @@ import { Button } from './Button';
 import { CommandHint } from './CommandHint';
 import { cn } from '../lib/cn';
 import {
+  CLIENT_VERSION,
   SUPPORTED_WAKE_WORDS,
   SUPPORTED_WHISPER_MODELS,
   type WakeWord,
@@ -134,7 +135,7 @@ export function SettingsPanel({
         {tab === 'reconhecimento' && <ReconhecimentoTab settings={settings} />}
         {tab === 'ativacao' && <AtivacaoTab settings={settings} />}
         {tab === 'conexao' && <ConexaoTab settings={settings} onRePair={onRePair} />}
-        {tab === 'avancado' && <AvancadoTab />}
+        {tab === 'avancado' && <AvancadoTab settings={settings} />}
       </main>
     </div>
   );
@@ -1418,6 +1419,32 @@ function ConexaoTab({
   settings: Settings;
   onRePair: () => void;
 }): JSX.Element {
+  const [preflight, setPreflight] = useState<{
+    state: 'idle' | 'running' | 'ok' | 'fail';
+    message?: string;
+    serverVersion?: string;
+  }>({ state: 'idle' });
+
+  const runPreflight = useCallback(async () => {
+    if (!settings.pairing) {
+      setPreflight({ state: 'fail', message: 'Sem pairing — usa Re-emparelhar para começar.' });
+      return;
+    }
+    setPreflight({ state: 'running' });
+    const startedAt = Date.now();
+    const r = await window.vg.pair.test(settings.pairing);
+    const elapsed = Date.now() - startedAt;
+    if (r.ok) {
+      setPreflight({
+        state: 'ok',
+        message: `Bridge respondeu em ${elapsed} ms`,
+        ...(r.serverVersion ? { serverVersion: r.serverVersion } : {}),
+      });
+    } else {
+      setPreflight({ state: 'fail', message: r.message });
+    }
+  }, [settings.pairing]);
+
   return (
     <div className="flex flex-col gap-5">
       <Section title="Bridge actual">
@@ -1425,6 +1452,38 @@ function ConexaoTab({
         <p className="break-all font-mono text-[10px] text-zinc-500">
           token: {settings.pairing?.token?.slice(0, 8)}…{settings.pairing?.token?.slice(-4)}
         </p>
+      </Section>
+      <Section title="Verificar ligação">
+        <p className="text-xs text-zinc-500">
+          Faz um handshake com o bridge actual sem afectar a sessão activa.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={runPreflight}
+            data-testid="conn-preflight"
+            disabled={preflight.state === 'running' || !settings.pairing}
+            loading={preflight.state === 'running'}
+          >
+            {preflight.state === 'running' ? 'A testar…' : 'Testar ligação ao bridge'}
+          </Button>
+          {preflight.state !== 'idle' && preflight.state !== 'running' && (
+            <span
+              data-testid="conn-preflight-result"
+              data-status={preflight.state}
+              className={cn(
+                'rounded-full px-2 py-1 text-[10px]',
+                preflight.state === 'ok'
+                  ? 'bg-green-900/40 text-green-200'
+                  : 'bg-red-900/40 text-red-200',
+              )}
+            >
+              {preflight.state === 'ok' ? '✓' : '✗'}
+              {preflight.serverVersion ? ` v${preflight.serverVersion}` : ''}
+              {preflight.message ? ` — ${preflight.message}` : ''}
+            </span>
+          )}
+        </div>
       </Section>
       <Section title="Re-emparelhar">
         <p className="text-xs text-zinc-500">
@@ -1440,7 +1499,7 @@ function ConexaoTab({
 
 // ───────── Avançado ─────────
 
-function AvancadoTab(): JSX.Element {
+function AvancadoTab({ settings }: { settings: Settings }): JSX.Element {
   const [confirming, setConfirming] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState<boolean>(false);
   const [logPath, setLogPath] = useState<string | null>(null);
@@ -1515,6 +1574,25 @@ function AvancadoTab(): JSX.Element {
             </code>
           )}
         </div>
+      </Section>
+      <Section title="Sobre">
+        <dl
+          data-testid="about-section"
+          className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-[11px] text-zinc-400"
+        >
+          <dt className="text-zinc-500">Versão</dt>
+          <dd data-testid="about-version" className="font-mono">{CLIENT_VERSION}</dd>
+          <dt className="text-zinc-500">Bridge</dt>
+          <dd data-testid="about-bridge" className="truncate font-mono">
+            {settings.pairing?.url ?? '(sem pairing)'}
+          </dd>
+          <dt className="text-zinc-500">Esquema</dt>
+          <dd data-testid="about-schema" className="font-mono">v{settings.schemaVersion}</dd>
+          <dt className="text-zinc-500">Plataforma</dt>
+          <dd data-testid="about-platform" className="font-mono">
+            {(globalThis as unknown as { navigator?: { platform?: string } }).navigator?.platform ?? '—'}
+          </dd>
+        </dl>
       </Section>
       <Section title="Factory reset">
         <p className="text-xs text-zinc-500">

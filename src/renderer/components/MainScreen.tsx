@@ -168,6 +168,16 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           () => conv.releaseTalk(),
           50,
         );
+      } else if ((ev.key === 's' || ev.key === 'S') && (ev.metaKey || ev.ctrlKey)) {
+        if (conv.transcript.length === 0) return; // nothing to save
+        ev.preventDefault();
+        const formatted = conv.transcript
+          .map((l) => `${l.role === 'user' ? 'Tu' : 'Hermes'}: ${l.text}`)
+          .join('\n');
+        void window.vg.transcript.export({
+          text: formatted,
+          defaultFileName: `voice-gateway-${new Date().toISOString().slice(0, 10)}.txt`,
+        });
       }
     };
     w.addEventListener('keydown', handler as (e: unknown) => void);
@@ -241,6 +251,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           onRelease={conv.releaseTalk}
           onCancel={conv.cancel}
         />
+        <CaptureElapsed capturing={conv.state === 'CAPTURING'} />
         <MainVuMeter capturing={conv.state === 'CAPTURING'} level={conv.level} />
         <HotkeyHint
           activationMode={activationMode}
@@ -274,7 +285,23 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         {conv.error && (
           <div className="flex max-w-md flex-col gap-2" data-testid="error-toast">
             <CommandHint message={conv.error} variant="error" />
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid="error-retry"
+                onClick={() => {
+                  // Same as Cmd+R but discoverable from the toast.
+                  conv.dismissError();
+                  conv.pressTalk();
+                  (globalThis as unknown as { setTimeout: (cb: () => void, ms: number) => number }).setTimeout(
+                    () => conv.releaseTalk(),
+                    50,
+                  );
+                }}
+              >
+                Tentar de novo
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"
@@ -358,6 +385,47 @@ function CallButtonRow({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Mini "elapsed" counter that ticks while the user is holding PTT (or the
+ * wake-word capture window is open). Helps the user gauge whether they
+ * went over the soft 30 s STT timeout without staring at a stopwatch.
+ *
+ * The interval is on a 100 ms cadence so the displayed tenths-of-a-second
+ * actually move. We restart from 0 on every CAPTURING entry — long-term
+ * `Date.now()` math avoids drift if the JS event loop pauses for a beat.
+ */
+function CaptureElapsed({ capturing }: { capturing: boolean }): JSX.Element | null {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    if (!capturing) {
+      setElapsedMs(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedMs(0);
+    const handle = (globalThis as unknown as {
+      setInterval: (cb: () => void, ms: number) => number;
+    }).setInterval(() => {
+      setElapsedMs(Date.now() - startedAt);
+    }, 100);
+    return () => {
+      (globalThis as unknown as { clearInterval: (h: number) => void }).clearInterval(handle);
+    };
+  }, [capturing]);
+  if (!capturing) return null;
+  const seconds = (elapsedMs / 1000).toFixed(1);
+  return (
+    <p
+      data-testid="capture-elapsed"
+      data-ms={String(elapsedMs)}
+      className="font-mono text-[11px] tabular-nums text-zinc-400"
+      aria-label={`Tempo de gravação: ${seconds} segundos`}
+    >
+      {seconds}s
+    </p>
   );
 }
 
