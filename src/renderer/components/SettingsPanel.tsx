@@ -1554,8 +1554,9 @@ function AvancadoTab({ settings }: { settings: Settings }): JSX.Element {
       <Section title="Idioma">
         <label className="flex flex-col gap-1">
           <span className="text-xs text-zinc-500">
-            Escolhe a língua da aplicação. A janela actual recarrega
-            automaticamente quando mudas.
+            Escolhe a língua da aplicação. Fecha e reabre a janela para
+            ver todas as etiquetas traduzidas — a maioria dos textos
+            ainda precisa de ser migrada nesta ronda.
           </span>
           <select
             data-testid="language-picker"
