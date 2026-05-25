@@ -112,10 +112,14 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
 
   const cancelWizard = (): void => {
     // Wipe everything the user typed and return to step 1. Useful on
-    // steps 2/3 if the user realises they pasted the wrong token or
-    // chose the wrong activation mode.
+    // steps 2/3/4 if the user realises they pasted the wrong token or
+    // picked the wrong activation mode / providers. Reviewer-spotted
+    // nit on PR #12: previously this reset only token + mode and left
+    // ttsProvider/sttProvider sticky between cancel cycles.
     setToken('');
     setMode('PUSH_TO_TALK');
+    setTtsProvider('piper_local');
+    setSttProvider('whisper_local');
     setProbe({ testing: false, result: null });
     setStep('url');
   };
