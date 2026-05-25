@@ -137,6 +137,13 @@ test.describe('UX round-10 — Avançado, wizard suggestions, VU meter, notifica
 
   // ───── #113: notification fires on SPEAKING → IDLE while window is "hidden"
   test('Main: notification fires on reply when document.hidden is true', async () => {
+    // Issue #30 (user-approved Option B): notification fires on the
+    // SPEAKING → IDLE edge which is dropped on headless macOS CI.
+    // Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('hello you'),
     });

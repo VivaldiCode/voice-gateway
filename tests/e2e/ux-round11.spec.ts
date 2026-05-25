@@ -150,6 +150,15 @@ test.describe('UX round-11 — capture timer, retry button, pre-flight, export, 
 
   // ───── #124: Cmd+S export → TRANSCRIPT_EXPORT IPC
   test('Cmd+S triggers TRANSCRIPT_EXPORT and main writes the formatted text', async () => {
+    // Issue #30 (user-approved Option B): Cmd+S export depends on the
+    // FSM completing a turn so the transcript has rows to format. On
+    // headless macOS CI the response_text → IDLE transition is dropped
+    // and the transcript stays empty, so the asserted file contents
+    // never match. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     // The renderer can't monkey-patch window.vg (contextBridge freezes it),
     // so we steer main with VG_E2E_EXPORT_TARGET instead — main skips the
     // OS Save dialog and writes straight to that path.
@@ -222,6 +231,14 @@ test.describe('UX round-11 — capture timer, retry button, pre-flight, export, 
 
   // ───── #126: transcript persistence across an app restart
   test('Transcript survives app restart (last 20 turns)', async () => {
+    // Issue #30 (user-approved Option B): the test seeds turns via the
+    // FSM, but the response_text → IDLE transition is dropped on
+    // headless macOS CI so the transcript stays empty before restart.
+    // Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('resposta persistente'),
     });

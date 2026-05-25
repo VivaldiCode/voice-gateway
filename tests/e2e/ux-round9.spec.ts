@@ -49,6 +49,14 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
 
   // ───── #103 + #100: turn counter shows, Cmd+L wipes the transcript
   test('Cmd+L clears the transcript locally and the counter goes back to 0', async () => {
+    // Issue #30 (user-approved Option B): asserts the transcript has 2
+    // turns before Cmd+L wipes it; the FSM doesn't reach a state where
+    // the rows render on headless macOS CI. Spec passes on dev macOS
+    // in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('ok'),
     });

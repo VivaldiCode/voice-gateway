@@ -46,6 +46,13 @@ test.describe('UX shortcuts + chrome', () => {
 
   // ───── #81: Escape + Cmd+, shortcuts
   test('Escape dismisses the error toast', async () => {
+    // Issue #30 (user-approved Option B): the error toast only renders
+    // after the FSM reaches ERROR; that transition is dropped on
+    // headless macOS CI. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedError({ code: 'HERMES_UPSTREAM', message: 'boom' }),
     });
@@ -104,6 +111,14 @@ test.describe('UX shortcuts + chrome', () => {
 
   // ───── #82: error toast diagnostic + readiness pill
   test('error toast has a "Copiar diagnóstico" button', async () => {
+    // Issue #30 (user-approved Option B): the diagnostic-copy button
+    // only renders after the error toast appears (FSM in ERROR). That
+    // transition is dropped on headless macOS CI. Spec passes on dev
+    // macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedError({ code: 'HERMES_UPSTREAM', message: 'diag check' }),
     });

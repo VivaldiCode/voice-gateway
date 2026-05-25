@@ -62,6 +62,13 @@ test.describe('runtime protocol', () => {
 
   // ───── #63: bridge sends explicit error frame
   test('bridge error frame surfaces in the error toast + FSM goes ERROR', async () => {
+    // Issue #30 (user-approved Option B): bridge-error → ERROR transition
+    // is dropped on headless macOS CI. Spec passes on dev macOS in
+    // non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     const errMsg = `Hermes respondeu sem texto — verifica o agent #${Date.now()}`;
     bridge = await startMockBridge({
       onClientMessage: scriptedError({
