@@ -113,6 +113,8 @@ interface VgApi {
   log: {
     /** Reveal the electron-log file in the OS file manager. */
     revealFile: () => Promise<{ ok: boolean; path: string; message?: string }>;
+    /** Read the last N lines of the electron-log file. */
+    readTail: (maxLines?: number) => Promise<{ ok: boolean; path: string; lines: string[]; message?: string }>;
   };
   transcript: {
     export: (payload: {

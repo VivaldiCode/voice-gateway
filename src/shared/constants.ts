@@ -116,6 +116,10 @@ export const IPC = {
   /** Renderer asks main to surface the electron-log file in Finder/Explorer.
    *  Returns the absolute path so the renderer can also display it. */
   LOG_REVEAL_FILE: 'vg:log:reveal-file',
+  /** Renderer asks for the last N lines of the electron-log file. Used by
+   *  the live log preview in Settings → Avançado (polled every ~1s).
+   *  Read-only — never throws even if the file isn't there yet. */
+  LOG_READ_TAIL: 'vg:log:read-tail',
   /** Renderer hands the formatted transcript text to main; main opens a
    *  Save dialog and writes it. Returns { ok, path? } so the renderer can
    *  show a quick confirmation toast. */
