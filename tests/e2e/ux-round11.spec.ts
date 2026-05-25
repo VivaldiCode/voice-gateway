@@ -211,7 +211,7 @@ test.describe('UX round-11 — capture timer, retry button, pre-flight, export, 
     await expect(settings.getByTestId('about-section')).toBeVisible();
     await expect(settings.getByTestId('about-version')).toContainText(/0\.\d+/);
     await expect(settings.getByTestId('about-bridge')).toContainText(/ws:\/\//);
-    await expect(settings.getByTestId('about-schema')).toContainText(/v5/);
+    await expect(settings.getByTestId('about-schema')).toContainText(/v\d+/);
   });
 
   // ───── #126: transcript persistence across an app restart

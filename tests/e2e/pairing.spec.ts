@@ -30,7 +30,7 @@ test.describe('PairingWizard E2E', () => {
     bridge = null;
   });
 
-  test('first run walks all three steps and lands on main screen', async () => {
+  test('first run walks all four steps and lands on main screen', async () => {
     bridge = await startMockBridge();
     rig = await launchUnpaired();
     const { mainWindow: page } = rig;
@@ -49,6 +49,12 @@ test.describe('PairingWizard E2E', () => {
     await page.getByTestId('token-next').click();
     await expect(page.getByRole('heading', { name: /como queres falar/i })).toBeVisible();
     await page.getByTestId('finish-pairing').click();
+
+    // I6 round-12: a new step lands between 'mode' and 'done' to pick
+    // the TTS + STT providers. Default selection (Piper local + Whisper
+    // local) is fine for this happy-path test; just confirm to advance.
+    await expect(page.getByTestId('wizard-providers')).toBeVisible({ timeout: 5_000 });
+    await page.getByTestId('wizard-providers-confirm').click();
 
     await expect(page.getByTestId('pairing-done')).toBeVisible({ timeout: 5_000 });
     await page.getByTestId('open-app').click();
