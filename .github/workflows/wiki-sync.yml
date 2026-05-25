@@ -1,0 +1,45 @@
+# Auto-sync docs/ → the GitHub wiki whenever docs/ changes on main.
+#
+# I11 (round 12): the docs live inside the main repo so PRs can review
+# them like any other file, but the rendered "wiki" experience lives
+# in the separate voice-gateway.wiki.git repo. This workflow keeps both
+# in sync without anyone running docs/sync-wiki.sh by hand.
+#
+# Permissions note: the default GITHUB_TOKEN can push to <repo>.wiki.git
+# when the workflow runs in the parent repo, because the wiki shares the
+# repo's permission scope. No PAT or deploy key required.
+
+name: Sync wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/wiki-sync.yml'
+  # Manual run for poking the sync ad-hoc without a docs change.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure git to use the workflow token for wiki push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The wiki sub-repo lives at <repo>.wiki.git. Inject the
+          # workflow token into the HTTPS URL so the script's `git push`
+          # is authenticated.
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Run docs/sync-wiki.sh
+        run: bash docs/sync-wiki.sh
