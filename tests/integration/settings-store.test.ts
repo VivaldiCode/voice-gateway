@@ -69,10 +69,11 @@ describe('settings-store — schema migration', () => {
     expect(s.activation.wakePhrase).toBe('hey hermes');
     expect(s.audio.outputMuted).toBe(false);
     expect(s.ui.autoLaunch).toBe(false);
+    expect(s.ui.tutorialSeen).toBe(false);
     expect(s.connection.recentUrls).toEqual([]);
     expect(s.connection.draftUrl).toBe('');
     expect(s.transcript.recent).toEqual([]);
-    expect(s.schemaVersion).toBe(5);
+    expect(s.schemaVersion).toBe(6);
   });
 
   it('migrates a v1 file (no wakeMode/wakePhrase) into the current shape', () => {
@@ -124,11 +125,11 @@ describe('settings-store — schema migration', () => {
     expect(s.ui.autoLaunch).toBe(false);
     expect(s.connection).toEqual({ recentUrls: [], draftUrl: '' });
     expect(s.transcript).toEqual({ recent: [] });
-    expect(s.schemaVersion).toBe(5);
+    expect(s.schemaVersion).toBe(6);
 
     // The migration is persisted back to disk so the next boot is fast.
     const onDisk = JSON.parse(readFileSync(storeFile(cwd), 'utf-8'));
-    expect(onDisk.settings.schemaVersion).toBe(5);
+    expect(onDisk.settings.schemaVersion).toBe(6);
     expect(onDisk.settings.activation.wakeMode).toBe('openww');
   });
 
@@ -148,7 +149,7 @@ describe('settings-store — schema migration', () => {
     const s = store.get();
     expect(s.audio.inputDeviceId).toBe('mic-x');
     expect(s.audio.outputMuted).toBe(false);
-    expect(s.schemaVersion).toBe(5);
+    expect(s.schemaVersion).toBe(6);
   });
 
   it('migrates a v3 file (no ui.autoLaunch / no connection) into v5 with the new defaults', () => {
@@ -171,7 +172,7 @@ describe('settings-store — schema migration', () => {
     expect(s.connection.recentUrls).toEqual([]);
     expect(s.connection.draftUrl).toBe('');
     expect(s.transcript.recent).toEqual([]);
-    expect(s.schemaVersion).toBe(5);
+    expect(s.schemaVersion).toBe(6);
   });
 
   it('migrates a v4 file (no transcript) into v5 with empty recent', () => {
@@ -187,7 +188,23 @@ describe('settings-store — schema migration', () => {
     const store = createSettingsStore({ cwd });
     const s = store.get();
     expect(s.transcript.recent).toEqual([]);
-    expect(s.schemaVersion).toBe(5);
+    expect(s.schemaVersion).toBe(6);
+  });
+
+  it('migrates a v5 file (no ui.tutorialSeen) into v6 with tutorialSeen=false', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v5-'));
+    const v5 = {
+      settings: {
+        ...defaultSettings(),
+        ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false } as unknown,
+        schemaVersion: 5,
+      },
+    };
+    writeFileSync(storeFile(cwd), JSON.stringify(v5));
+    const store = createSettingsStore({ cwd });
+    const s = store.get();
+    expect(s.ui.tutorialSeen).toBe(false);
+    expect(s.schemaVersion).toBe(6);
   });
 
   it('round-trips persisted transcript lines through set() + reload', () => {
@@ -240,7 +257,7 @@ describe('settings-store — schema migration', () => {
     expect(store.get().pairing).not.toBeNull();
     const after = store.reset();
     expect(after.pairing).toBeNull();
-    expect(after.schemaVersion).toBe(5);
+    expect(after.schemaVersion).toBe(6);
   });
 
   it('onChange listeners fire on set() and unregister cleanly', () => {

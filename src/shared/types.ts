@@ -117,6 +117,12 @@ export interface UiSettings {
    * the OS state on every change so the toggle is durable across launches.
    */
   autoLaunch: boolean;
+  /**
+   * True once the user has seen the post-pair interactive tutorial OR
+   * explicitly skipped it. The tutorial never auto-plays again. Reset
+   * via Settings → Avançado → "Mostrar tutorial outra vez" (round-12 I5).
+   */
+  tutorialSeen: boolean;
 }
 
 /**

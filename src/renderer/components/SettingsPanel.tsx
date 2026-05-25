@@ -1606,6 +1606,27 @@ function AvancadoTab({ settings }: { settings: Settings }): JSX.Element {
         </div>
         <LogPreview />
       </Section>
+      <Section title="Tutorial">
+        <p className="text-xs text-zinc-500">
+          Mostra outra vez o tutorial interactivo que apareceu na primeira
+          execução.
+        </p>
+        <Button
+          variant="ghost"
+          data-testid="replay-tutorial"
+          onClick={async () => {
+            await window.vg.settings.set({ ui: { tutorialSeen: false } });
+            // The tutorial gate lives on settings.ui.tutorialSeen — main
+            // re-broadcasts SETTINGS_CHANGED to every open window so the
+            // main window will re-render with the overlay on next focus
+            // (no need to reload). Closing the Settings window here just
+            // returns the user to the main view immediately.
+            window.close();
+          }}
+        >
+          Mostrar tutorial outra vez
+        </Button>
+      </Section>
       <Section title="Sobre">
         <dl
           data-testid="about-section"
