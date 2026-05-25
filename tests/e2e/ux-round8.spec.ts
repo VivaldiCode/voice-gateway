@@ -216,11 +216,11 @@ test.describe('UX round-8 — wizard', () => {
   test('wizard step indicator shows "passo X de 3" and updates per step', async () => {
     rig = await launchUnpaired();
     const { mainWindow: page } = rig;
-    await expect(page.getByTestId('wizard-step-label')).toContainText('passo 1 de 3');
+    await expect(page.getByTestId('wizard-step-label')).toContainText('passo 1 de 4');
 
     await page.getByLabel('Endereço do bridge').fill('ws://10.0.0.1:8765');
     await page.getByTestId('url-next').click();
-    await expect(page.getByTestId('wizard-step-label')).toContainText('passo 2 de 3');
+    await expect(page.getByTestId('wizard-step-label')).toContainText('passo 2 de 4');
   });
 
   // ───── #94: cancel link wipes state + returns to step 1
@@ -236,7 +236,7 @@ test.describe('UX round-8 — wizard', () => {
 
     // Back on step 1.
     await expect(page.getByRole('heading', { name: /onde está o teu hermes/i })).toBeVisible();
-    await expect(page.getByTestId('wizard-step-label')).toContainText('passo 1 de 3');
+    await expect(page.getByTestId('wizard-step-label')).toContainText('passo 1 de 4');
 
     // Step 2 again — token is empty.
     await page.getByTestId('url-next').click();
