@@ -249,6 +249,13 @@ test.describe('conversation extras', () => {
 
   // ───── #35: server-side response_audio_chunk binary path
   test('server-side audio chunks flow through to the renderer', async () => {
+    // Issue #30 (user-approved Option B): audio-chunk IPC race on headless
+    // macOS — the tts_chunk events arrive but the chunk-count predicate
+    // sees zero. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: (raw, _send) => {
         const m = raw as { type?: string; turn_id?: string };
