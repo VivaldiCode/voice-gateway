@@ -108,6 +108,7 @@ merge — none have been needed so far.
 | 1       | Initial release (pairing, activation, stt, tts, audio, ui). |
 | 2       | `activation.wakeMode` + `activation.wakePhrase` for custom-phrase wake-word mode. |
 | 3       | `audio.outputMuted` — renderer-side TTS mute toggle persisted across launches. |
+| 4       | `ui.autoLaunch` (open at login toggle) + `connection.recentUrls` / `connection.draftUrl` (PairingWizard suggestion history + in-flight draft). |
 
 Each bump is purely additive — old files survive the merge above and
 just gain the new fields with their default values. Tests in

@@ -204,7 +204,7 @@ npm run build:mac          # produce release/*.dmg
 npm run test:e2e
 ```
 
-Currently covers **60 tests across 18 spec files** (~3 min wall-clock,
+Currently covers **65 tests across 19 spec files** (~3 min wall-clock,
 single worker):
 
 - Pairing wizard happy path + 3-step navigation + cancel-on-step-2 +
@@ -223,7 +223,14 @@ single worker):
   flash, ReadinessPill, error-toast Copy Diagnostics + Escape, tray
   menu with Cmd+, opening Settings, **Cmd+L wipes transcript**,
   **Cmd+R retries after ERROR**, **transcript copy + counter chips**,
-  **click connection indicator to reconnect**, **mute toggle**.
+  **click connection indicator to reconnect**, **mute toggle**,
+  **VU meter visible during CAPTURING**, **system notification on
+  reply when window hidden**.
+- Settings → Avançado: factory reset, **auto-launch toggle**,
+  **"Abrir registo de eventos" reveals the log file path**.
+- PairingWizard: wizard cancel link, token paste whitespace trim,
+  **datalist + chip list of recent bridge URLs**, **draft URL
+  persistence across launches**.
 - Re-pair to a different bridge mid-session and recover; reconnect
   after the server bounces the socket; capability negotiation
   (`hello` + `welcome` shape).
@@ -393,16 +400,23 @@ Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 ### Coverage baseline (`npm run coverage`)
 
 ```
-All files       | 82.36 % stmts | 84.57 % branches | 89.18 % funcs
-src/shared      | 96.82 % stmts
-src/main/services | 77.85 % stmts
+All files       | 86.87 % stmts | 84.23 % branches | 91.89 % funcs
+src/shared      | 97.89 % stmts
+src/main/services | 79.78 % stmts
   conversation-orchestrator.ts | 86.17 % stmts
   hermes-client.ts             | 89.76 % stmts
   settings-store.ts            |  100   % stmts
   stt-service.ts               | 78.11 % stmts
-  tts-service.ts               | 65.37 % stmts
-  wake-word-service.ts         | 59.67 % stmts
+  tts-service.ts               | 73.78 % stmts
+  wake-word-service.ts         | 60.90 % stmts
+  protocol.ts (shared)         | 98.23 % stmts
 ```
+
+The `tts-service` and `wake-word-service` auto-install pipelines
+(venv creation, `pip install`, Hugging Face downloads) deliberately
+remain uncovered by unit tests — they require elaborate spawn
+sequencing and real filesystem state. The Playwright suite exercises
+the happy paths against the packaged app instead.
 
 The shared layer (FSM, protocol, helpers) is essentially fully covered.
 The remaining gap in `src/main/services/` is mostly subprocess
@@ -415,7 +429,7 @@ heavier mock layer; the E2E suite is the right place to catch them.
 The `types.ts` declaration file is intentionally excluded from the
 coverage report — it has no runtime statements and would appear as 0 %.
 
-### What the suite currently covers (60 specs across 18 files)
+### What the suite currently covers (65 specs across 19 files)
 
 ```
 tests/e2e/
@@ -444,6 +458,10 @@ tests/e2e/
 ├── ux-round9.spec.ts                   Cmd+L clears transcript, Cmd+R retry-from-
 │                                       ERROR, copy/clear chips + turn counter,
 │                                       click-to-reconnect indicator, mute toggle (5)
+├── ux-round10.spec.ts                  auto-launch toggle persists, log file reveal,
+│                                       VU meter visibility, system notification on
+│                                       reply when window hidden, wizard URL chips
+│                                       + draft persistence (5)
 ├── ux-shortcuts.spec.ts                Escape dismisses error toast,
 │                                       Cmd+, opens Settings, "Copiar diagnóstico"
 │                                       button, ReadinessPill, token paste trim (5)
@@ -454,7 +472,7 @@ tests/e2e/
                                         token field is multi-line monospace (2)
 ```
 
-60 specs totalling ~3 minutes for a full local run. The real-audio one
+65 specs totalling ~3 minutes for a full local run. The real-audio one
 is the only slow case (~20 s — STT + Piper warmup); everything else is
 <3 s each thanks to the fake STT / fake wake runner / mock bridge stack.
 

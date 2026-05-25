@@ -112,9 +112,10 @@ export async function writeSeedSettings(
           piper: { modelId: 'en_US-lessac-medium' },
           elevenlabs: { apiKey: '', voiceId: '', modelId: 'eleven_turbo_v2_5' },
         },
-        audio: { inputDeviceId: null, outputDeviceId: null },
-        ui: { language: 'pt', theme: 'dark', startMinimized: false },
-        schemaVersion: 2,
+        audio: { inputDeviceId: null, outputDeviceId: null, outputMuted: false },
+        ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false },
+        connection: { recentUrls: [], draftUrl: '' },
+        schemaVersion: 4,
       },
     }),
   );

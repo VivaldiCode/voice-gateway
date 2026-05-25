@@ -233,8 +233,8 @@ adds inline `<style>` tags.
 
 The E2E suite leans on a small set of `data-testid` attributes that
 the renderer treats as **public contract**. Don't rename them without
-updating the matching Playwright assertions — the suite (60 specs
-across 18 files) will fail loud.
+updating the matching Playwright assertions — the suite (65 specs
+across 19 files) will fail loud.
 
 | Test ID                       | Component        | What it surfaces                                   |
 |-------------------------------|------------------|----------------------------------------------------|
@@ -249,6 +249,10 @@ across 18 files) will fail loud.
 | `transcript-user` / `transcript-assistant` | (rows in TranscriptView) | One per turn; lets specs assert ordering + text |
 | `connection-indicator`        | `MainScreen`     | `<button>` carrying "Ligado (N ms)" / "A ligar…" (with attempt counter) / "Sem ligação". Carries `data-clickable="true"` while disconnected; clicking then asks main to `reconnectNow()`. |
 | `mute-toggle`                 | `MainScreen`     | Speaker icon in the header. Toggles `settings.audio.outputMuted`; the renderer drops every incoming TTS chunk while `data-muted="true"`. FSM is untouched. |
+| `main-vu-meter`               | `MainScreen`     | Slim level bar that only renders while `state === 'CAPTURING'`. Carries `data-level` (0..1) so specs can sample without clipping. |
+| `auto-launch-toggle`          | Avançado tab     | Checkbox bound to `settings.ui.autoLaunch`; main reconciles via `app.setLoginItemSettings` on every change. |
+| `reveal-log-file` / `reveal-log-path` | Avançado tab | Button + path-display chip for "Abrir registo de eventos". Clicking shells out to `shell.showItemInFolder(electron-log.path)`. |
+| `url-input` / `recent-bridge-chip` / `bridge-url-history` | `PairingWizard` step 1 | URL input + `<datalist>` + chip list of the last-N paired URLs (`MAX_RECENT_BRIDGE_URLS = 3`). |
 | `warning-toast` / `error-toast` | `MainScreen`   | The `CommandHint` banners. `warning-toast` auto-dismisses after 4 s |
 | `tab-microfone` / `tab-voz` / `tab-ativacao` / `tab-avancado` etc. | `SettingsPanel` | One per tab in the Settings window |
 | `settings-saved-indicator`    | `SettingsPanel`  | Transient "Guardado" pill that flashes for ~1.2 s after a setting change reaches the renderer via `settings.onChange` |

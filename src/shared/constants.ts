@@ -29,6 +29,13 @@ export const WS_RECONNECT_MAX_MS = 30_000;
 export const DEFAULT_GLOBAL_HOTKEY_MAC = 'CommandOrControl+Shift+H';
 export const DEFAULT_GLOBAL_HOTKEY_OTHER = 'Control+Shift+H';
 
+/**
+ * Maximum number of bridge URLs we keep around for the wizard's
+ * suggestion dropdown. Smaller than typical "recent files" lists
+ * because most users only ever pair with 1–2 bridges.
+ */
+export const MAX_RECENT_BRIDGE_URLS = 3;
+
 export const SUPPORTED_WAKE_WORDS = [
   'hey_jarvis',
   'alexa',
@@ -99,6 +106,9 @@ export const IPC = {
   TTS_TEST: 'vg:tts:test',
   AUDIO_TEST_TTS_CHUNK: 'vg:audio:test-tts-chunk',
   LOG: 'vg:log',
+  /** Renderer asks main to surface the electron-log file in Finder/Explorer.
+   *  Returns the absolute path so the renderer can also display it. */
+  LOG_REVEAL_FILE: 'vg:log:reveal-file',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

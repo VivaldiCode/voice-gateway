@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, systemPreferences, type Tray, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell, systemPreferences, type Tray, screen } from 'electron';
 import log from 'electron-log/main';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -560,7 +560,23 @@ ipcMain.handle(
 );
 ipcMain.on(IPC.WAKE_TEST_STOP, () => stopTestWake());
 
+// Reveal the electron-log file in the OS file manager so users can grab
+// it for bug reports. Returns the absolute path so the renderer can also
+// show it in the UI even when shell.showItemInFolder fails (CI / headless).
+ipcMain.handle(IPC.LOG_REVEAL_FILE, async () => {
+  const file = log.transports.file.getFile();
+  const path = file.path;
+  try {
+    shell.showItemInFolder(path);
+    return { ok: true as const, path };
+  } catch (err) {
+    log.warn('[VG] showItemInFolder failed', err);
+    return { ok: false as const, path, message: (err as Error).message };
+  }
+});
+
 let lastSettingsSnapshot = JSON.stringify(settings.get());
+let lastAutoLaunch = settings.get().ui.autoLaunch;
 settings.onChange((next) => {
   // Rebuild the pipeline when pairing OR STT/TTS provider configuration
   // changes — otherwise the user can switch from Piper to ElevenLabs in
@@ -570,9 +586,33 @@ settings.onChange((next) => {
     bootstrapConversation();
   }
   lastSettingsSnapshot = snap;
+  // Reconcile the OS-level login-item state with our settings whenever the
+  // toggle changes. Cheap (system call) so no need to debounce.
+  if (next.ui.autoLaunch !== lastAutoLaunch) {
+    applyAutoLaunch(next.ui.autoLaunch);
+    lastAutoLaunch = next.ui.autoLaunch;
+  }
   rebuildHotkey();
   void rebuildWakeWord();
 });
+
+/**
+ * Push the user's auto-launch preference to the OS. macOS + Windows are
+ * supported natively by Electron; on Linux it's a no-op (would need a
+ * .desktop file written to ~/.config/autostart, out of scope for now).
+ *
+ * Errors are swallowed and logged because there's nothing actionable —
+ * the user already sees the toggle; if the OS refuses we don't want to
+ * brick the UI just because the system setting got out of sync.
+ */
+function applyAutoLaunch(openAtLogin: boolean): void {
+  try {
+    app.setLoginItemSettings({ openAtLogin });
+    log.info('[VG] login item updated', { openAtLogin });
+  } catch (err) {
+    log.warn('[VG] failed to update login item', err);
+  }
+}
 
 /**
  * Wire microphone permissions exactly once at app boot.
@@ -607,6 +647,10 @@ function wireMediaPermissions(): void {
 
 app.whenReady().then(() => {
   wireMediaPermissions();
+  // Reconcile the OS-level login-item state once on boot — handles the
+  // case where the user toggled auto-launch off in System Preferences
+  // directly, or where a fresh install needs to match a migrated setting.
+  applyAutoLaunch(settings.get().ui.autoLaunch);
   createMainWindow();
   tray = createTray(getMainWindow, { openSettings: openSettingsWindow });
   void tray; // kept around so we can extend later (icon tint on wake / error)

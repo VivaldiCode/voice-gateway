@@ -1,5 +1,9 @@
 import { EventEmitter, Readable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WakeWordService } from '@main/services/wake-word-service';
 
 interface FakeProcResult {
@@ -326,5 +330,218 @@ describe('WakeWordService (JSON-line parser edge cases)', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(exited).toBe(true);
     expect(svc.isRunning()).toBe(false);
+  });
+
+  it('honours explicit pythonExe and skips both venv + PATH lookup', async () => {
+    let whichCalls = 0;
+    const { spawnImpl } = fakeSpawn([]);
+    const svc = new WakeWordService({
+      spawnImpl,
+      scriptPath: '/tmp/x.py',
+      pythonExe: '/opt/custom/python',
+      autoInstall: false,
+      whichImpl: async () => {
+        whichCalls += 1;
+        return null;
+      },
+    });
+    const py = await svc.resolvePython();
+    expect(py).toBe('/opt/custom/python');
+    expect(whichCalls).toBe(0);
+  });
+
+  it('emits a phrase-mode ready event with the configured phrase', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'ready', phrase: 'olá hermes' }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const seen: Array<{ phrase?: string }> = [];
+    svc.on('ready', (info) => seen.push(info));
+    await svc.start({
+      mode: 'phrase',
+      phrase: 'olá hermes',
+      whisperBin: '/bin/whisper',
+      whisperModel: 'base',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen[0]?.phrase).toBe('olá hermes');
+  });
+
+  it('emits structured error from JSON error events on stdout', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'error', message: 'PortAudio not initialised' }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const errs: string[] = [];
+    svc.on('error', (m) => errs.push(m));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errs).toContain('PortAudio not initialised');
+  });
+
+  it('emits transcript event in phrase mode for streaming previews', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'transcript', text: 'a tentar dizer' }),
+      JSON.stringify({ event: 'transcript', text: 'a tentar dizer alguma coisa' }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const out: string[] = [];
+    svc.on('transcript', (t) => out.push(t));
+    await svc.start({
+      mode: 'phrase',
+      phrase: 'algo',
+      whisperBin: '/bin/whisper',
+      whisperModel: 'base',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(out).toEqual(['a tentar dizer', 'a tentar dizer alguma coisa']);
+  });
+
+  it('silently drops events with an unknown "event" field', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ event: 'galactic-cataclysm', payload: 42 }),
+      JSON.stringify({ event: 'ready', models: ['ok'] }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const reads: Array<{ models?: string[] }> = [];
+    svc.on('ready', (info) => reads.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    // Only the well-formed ready event surfaced; the unknown event is dropped.
+    expect(reads).toHaveLength(1);
+    expect(reads[0]?.models).toEqual(['ok']);
+  });
+
+  it('drops events whose payload has no "event" string at all', async () => {
+    const { spawnImpl } = fakeSpawn([
+      JSON.stringify({ models: ['x'] }), // missing 'event'
+      JSON.stringify({ event: 42 }),     // non-string event
+      JSON.stringify({ event: 'ready', models: ['real'] }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const reads: Array<{ models?: string[] }> = [];
+    svc.on('ready', (info) => reads.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]?.models).toEqual(['real']);
+  });
+
+  it('drops a ready event whose models field is not a string array', async () => {
+    const { spawnImpl } = fakeSpawn([
+      // models present but not all-strings → emits ready without models field.
+      JSON.stringify({ event: 'ready', models: ['ok', 7, true] }),
+    ]);
+    const svc = makeSvc(spawnImpl);
+    const reads: Array<{ models?: string[] }> = [];
+    svc.on('ready', (info) => reads.push(info));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]?.models).toBeUndefined();
+  });
+
+  it('handles spawnImpl throwing synchronously by emitting error', async () => {
+    const exploder = (() => {
+      throw new Error('spawn-init exploded');
+    }) as unknown as FakeProcResult['spawnImpl'];
+    const svc = new WakeWordService({
+      spawnImpl: exploder,
+      scriptPath: '/tmp/x.py',
+      pythonExe: 'python3',
+      autoInstall: false,
+    });
+    const errs: string[] = [];
+    svc.on('error', (m) => errs.push(m));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    expect(errs[0]).toMatch(/exploded/);
+    expect(svc.isRunning()).toBe(false);
+  });
+
+  // ───── buildVenv (auto-install) edge cases — exercise paths in the
+  // auto-install pipeline that don't need a real Python+pip pair installed.
+  it('autoInstall bails out cleanly when sysPython is missing', async () => {
+    const svc = new WakeWordService({
+      // No explicit pythonExe → resolvePython hits the auto-install branch.
+      scriptPath: '/tmp/x.py',
+      autoInstall: true,
+      whichImpl: async () => null, // no python3 anywhere
+      spawnImpl: ((() => undefined) as unknown) as FakeProcResult['spawnImpl'],
+    });
+    const errs: string[] = [];
+    svc.on('error', (m) => errs.push(m));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    expect(errs[0]).toMatch(/python3/i);
+  });
+
+  it('autoInstall returns null when requirements.txt is missing next to the script', async () => {
+    // Mock spawn so every subprocess (python -m venv, pip install …) exits 0
+    // but the requirements.txt file simply isn't on disk. buildVenv must then
+    // log + return null, falling back to system python3.
+    const tmp = await mkdtemp(join(tmpdir(), 'vg-wake-noreqs-'));
+    try {
+      // Drop a placeholder script file at scriptPath; requirements.txt
+      // intentionally absent.
+      const scriptPath = join(tmp, 'runner.py');
+      await fs.writeFile(scriptPath, '# fake');
+      const successSpawn = (() => {
+        const proc = new EventEmitter() as EventEmitter & {
+          stdout: EventEmitter;
+          stderr: EventEmitter;
+          kill: (s?: string) => void;
+        };
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = () => undefined;
+        // close 0 for every subprocess. Means venv-create + pip-self-upgrade
+        // both "succeed" so we reach the requirements.txt access check.
+        setImmediate(() => proc.emit('close', 0));
+        return proc;
+      }) as unknown as FakeProcResult['spawnImpl'];
+
+      const svc = new WakeWordService({
+        scriptPath,
+        autoInstall: true,
+        whichImpl: async (cmd) => (cmd === 'python3' ? '/usr/bin/python3' : null),
+        spawnImpl: successSpawn,
+      });
+      // resolvePython hits buildVenv → null (no reqs) → falls back to '/usr/bin/python3'.
+      const py = await svc.resolvePython();
+      expect(py).toBe('/usr/bin/python3');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('proc error event is forwarded as an error event', async () => {
+    // Synthesise a proc that emits 'error' after start.
+    const argCalls: string[][] = [];
+    const spawnImpl = ((_path: string, args: string[]) => {
+      argCalls.push(args);
+      const stdout = new Readable({ read() {} });
+      const stderr = new Readable({ read() {} });
+      const proc = new EventEmitter() as EventEmitter & {
+        stdout: Readable;
+        stderr: Readable;
+        kill: (s?: string) => void;
+      };
+      proc.stdout = stdout;
+      proc.stderr = stderr;
+      proc.kill = () => undefined;
+      setImmediate(() => proc.emit('error', new Error('child crash')));
+      return proc;
+    }) as unknown as FakeProcResult['spawnImpl'];
+
+    const svc = new WakeWordService({
+      spawnImpl,
+      scriptPath: '/tmp/x.py',
+      pythonExe: 'python3',
+      autoInstall: false,
+    });
+    const errs: string[] = [];
+    svc.on('error', (m) => errs.push(m));
+    await svc.start({ mode: 'openww', model: 'hey_jarvis' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errs.some((e) => /child crash/.test(e))).toBe(true);
   });
 });

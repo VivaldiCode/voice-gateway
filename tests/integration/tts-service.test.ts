@@ -291,6 +291,176 @@ describe('ElevenLabsAdapter', () => {
   });
 });
 
+describe('PiperAdapter — additional coverage', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'vg-piper-extra-'));
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('discoverBinary falls back to the second PATH candidate when the first fails', async () => {
+    await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx'), '');
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx.json'), '{}');
+    let calls = 0;
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'no-such-bin'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+      whichImpl: async (cmd) => {
+        calls += 1;
+        // First candidate ('piper') misses, second ('piper-tts') hits.
+        if (cmd === 'piper-tts') return '/opt/piper-tts';
+        return null;
+      },
+    });
+    expect(await a.isReady()).toBe(true);
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('discoverBinary caches the resolved binary after a hit', async () => {
+    await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx'), '');
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx.json'), '{}');
+    let whichCount = 0;
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'no-such-bin'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+      whichImpl: async (cmd) => {
+        whichCount += 1;
+        return cmd === 'piper' ? '/opt/piper' : null;
+      },
+    });
+    expect(await a.isReady()).toBe(true);
+    // Second call hits the cached value — no extra `which` calls.
+    const countAfterFirst = whichCount;
+    expect(await a.isReady()).toBe(true);
+    expect(whichCount).toBe(countAfterFirst);
+  });
+
+  it('isReady returns false when the .onnx is present but the .onnx.json is not', async () => {
+    await fs.writeFile(join(tmpDir, 'piper'), '');
+    await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx'), '');
+    // intentionally skip the metadata file
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+    });
+    expect(await a.isReady()).toBe(false);
+  });
+
+  it('prepare rejects on an unknown voice id even if the binary exists', async () => {
+    await fs.writeFile(join(tmpDir, 'piper'), '');
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'bogus-voice-id-not-in-catalog' },
+      whichImpl: async () => null,
+      downloadFile: async () => undefined,
+    });
+    await expect(a.prepare()).rejects.toThrow(/desconhecida|piper/i);
+  });
+
+  it('prepare downloads BOTH .onnx and .onnx.json when missing', async () => {
+    await fs.writeFile(join(tmpDir, 'piper'), '');
+    const downloads: string[] = [];
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'en_US-lessac-medium' },
+      whichImpl: async () => null,
+      downloadFile: async (url, dest) => {
+        downloads.push(url);
+        await fs.mkdir(join(dest, '..'), { recursive: true });
+        await fs.writeFile(dest, 'fake');
+      },
+    });
+    await a.prepare();
+    expect(downloads).toHaveLength(2);
+    expect(downloads.some((u) => u.endsWith('.onnx'))).toBe(true);
+    expect(downloads.some((u) => u.endsWith('.onnx.json'))).toBe(true);
+  });
+
+  it('speak() before isReady throws a friendly install hint', async () => {
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper-missing'),
+      voicesDir: join(tmpDir, 'voices-missing'),
+      config: { modelId: 'v' },
+    });
+    await expect(a.speak('hi')).rejects.toThrow(/Definições|voz|pronto|piper/i);
+  });
+
+  it('emitting "end" on close with code null (signalled) does not produce an error', async () => {
+    await fs.writeFile(join(tmpDir, 'piper'), '');
+    await fs.mkdir(join(tmpDir, 'voices'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx'), '');
+    await fs.writeFile(join(tmpDir, 'voices', 'v.onnx.json'), '{}');
+
+    const fakeSpawn = (() => {
+      const proc = new EventEmitter() as EventEmitter & {
+        stdin: { end: (b?: Buffer | string) => void };
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: (s?: string) => void;
+      };
+      proc.stdin = { end: () => undefined };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = () => undefined;
+      setImmediate(() => proc.emit('close', null)); // SIGTERM-like close
+      return proc;
+    }) as unknown as ConstructorParameters<typeof PiperAdapter>[0]['spawnImpl'];
+
+    const a = new PiperAdapter({
+      binaryPath: join(tmpDir, 'piper'),
+      voicesDir: join(tmpDir, 'voices'),
+      config: { modelId: 'v' },
+      spawnImpl: fakeSpawn,
+    });
+    let ended = false;
+    a.on('end', () => {
+      ended = true;
+    });
+    a.on('error', () => {
+      throw new Error('should not emit error on null exit');
+    });
+    await a.speak('hi');
+    await new Promise((r) => setImmediate(r));
+    expect(ended).toBe(true);
+  });
+});
+
+describe('ElevenLabsAdapter — additional coverage', () => {
+  it('ignores stop() calls after a request completed naturally', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([0xff, 0xfb]));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'audio/mpeg' } },
+      ),
+    );
+    const a = new ElevenLabsAdapter({
+      config: { apiKey: 'k', voiceId: 'v', modelId: 'm' },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const ended = new Promise<void>((resolve) => a.once('end', () => resolve()));
+    await a.speak('hi');
+    await ended;
+    expect(() => a.stop()).not.toThrow();
+    expect(() => a.stop()).not.toThrow();
+  });
+});
+
 describe('createTtsAdapter', () => {
   it('builds a Piper adapter for piper_local', () => {
     const a = createTtsAdapter({

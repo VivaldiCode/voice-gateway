@@ -345,7 +345,9 @@ describe('OpenAIWhisperAdapter — additional coverage', () => {
   });
 
   it("transcribe omits the language form field when language === 'auto'", async () => {
-    let seenLanguage: FormDataEntryValue | null = null;
+    // FormDataEntryValue lives in the DOM lib which isn't on Node's
+    // tsconfig — keep it as unknown and check for null at runtime.
+    let seenLanguage: unknown = 'unset';
     const fetchImpl = vi.fn(async (_url, init) => {
       const body = (init as RequestInit).body as FormData;
       seenLanguage = body.get('language');

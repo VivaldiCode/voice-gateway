@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, shell, systemPreferences } from 'electron';
 import log from 'electron-log/main';
 import WebSocket from 'ws';
-import { CLIENT_VERSION, IPC } from '@shared/constants';
+import { CLIENT_VERSION, IPC, MAX_RECENT_BRIDGE_URLS } from '@shared/constants';
 import type { ElevenLabsConfig, PairingInfo, Settings } from '@shared/types';
 import { parseServerMessage } from '@shared/protocol';
 import { normalizeBridgeUrl } from '@shared/url-utils';
@@ -329,7 +329,20 @@ export function registerIpcHandlers(
       IPC.PAIR_SAVE,
       async (_e, info: PairingInfo) => {
         const result = await testPairing(info);
-        if (result.ok) settings.set({ pairing: info });
+        if (result.ok) {
+          // Record the URL in the wizard-suggestion history (dedup, MRU
+          // order, cap at MAX_RECENT_BRIDGE_URLS) AND clear the in-flight
+          // draft so a fresh wizard run starts empty.
+          const current = settings.get().connection;
+          const next = [info.url, ...current.recentUrls.filter((u) => u !== info.url)].slice(
+            0,
+            MAX_RECENT_BRIDGE_URLS,
+          );
+          settings.set({
+            pairing: info,
+            connection: { recentUrls: next, draftUrl: '' },
+          });
+        }
         return result;
       },
     ],

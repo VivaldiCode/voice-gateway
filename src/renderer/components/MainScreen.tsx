@@ -91,6 +91,48 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
     return;
   }, [conv.state, activationMode]);
 
+  // System-notification trigger: when a NEW assistant turn lands AND the
+  // window is hidden or unfocused, fire a Notification so the user
+  // knows there's a reply waiting. Skipped if TTS is muted (the user
+  // has signalled they don't want audible nudges right now) or if
+  // Notifications haven't been granted.
+  //
+  // We use the assistant transcript line id as the edge marker rather
+  // than the SPEAKING state, because text-only replies (no Piper audio)
+  // skip SPEAKING entirely. Tracking the id also dedups so the same
+  // reply never fires twice across re-renders.
+  const lastNotifiedTurnRef = useRef<string | null>(null);
+  useEffect(() => {
+    const lastAssistant = [...conv.transcript].reverse().find((l) => l.role === 'assistant');
+    if (!lastAssistant) return;
+    if (lastAssistant.id === lastNotifiedTurnRef.current) return;
+    // Only fire once we're back at rest (don't ping during STREAMING).
+    if (conv.state !== 'IDLE' && conv.state !== 'LISTENING_WAKE') return;
+    lastNotifiedTurnRef.current = lastAssistant.id;
+    if (conv.outputMuted) return;
+    const doc = (globalThis as unknown as { document?: { hidden: boolean; hasFocus: () => boolean } }).document;
+    if (!doc) return;
+    if (!doc.hidden && doc.hasFocus()) return;
+    try {
+      const NotificationCtor = (globalThis as unknown as { Notification?: typeof Notification }).Notification;
+      if (!NotificationCtor) return;
+      if (NotificationCtor.permission === 'granted') {
+        new NotificationCtor('Hermes respondeu', {
+          body: lastAssistant.text.slice(0, 140),
+          silent: true,
+          tag: 'vg-reply',
+        });
+      } else if (NotificationCtor.permission !== 'denied') {
+        // Best-effort one-shot: request once. Don't await — next reply
+        // will be fast-pathed once the user picks "Allow".
+        void NotificationCtor.requestPermission();
+      }
+    } catch {
+      // Notifications unavailable in this runtime (e.g. headless E2E
+      // without --enable-features). Silent fallback is fine.
+    }
+  }, [conv.state, conv.outputMuted, conv.transcript]);
+
   // Window-level keyboard shortcuts.
   // - Escape: dismiss the sticky error toast, OR if we're CAPTURING, cancel
   //   the in-flight turn so the user doesn't have to find a button.
@@ -199,6 +241,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           onRelease={conv.releaseTalk}
           onCancel={conv.cancel}
         />
+        <MainVuMeter capturing={conv.state === 'CAPTURING'} level={conv.level} />
         <HotkeyHint
           activationMode={activationMode}
           hotkey={globalHotkey}
@@ -314,6 +357,36 @@ function CallButtonRow({
           <XIcon className="h-4 w-4" />
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Slim VU meter that only appears while we're CAPTURING. Echoes the same
+ * `conv.level` value the settings panel uses, so users see "yes the mic
+ * is picking up sound" without having to open Settings. Width animates
+ * 0..100 % so it's visible even at low levels (Math.max with a 4 % floor).
+ */
+function MainVuMeter({
+  capturing,
+  level,
+}: {
+  capturing: boolean;
+  level: number;
+}): JSX.Element | null {
+  if (!capturing) return null;
+  const pct = Math.round(Math.max(0.04, Math.min(1, level)) * 100);
+  return (
+    <div
+      data-testid="main-vu-meter"
+      data-level={level.toFixed(3)}
+      className="h-1 w-32 overflow-hidden rounded-full bg-bg-subtle"
+      aria-label="Nível do microfone"
+    >
+      <div
+        className="h-full rounded-full bg-accent transition-[width] duration-75"
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }

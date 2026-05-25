@@ -100,12 +100,18 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
     // Permit clipboard writes for the test origin (file://) — Playwright
     // doesn't auto-grant clipboard-write inside an Electron context.
     await mainWindow.evaluate(() => {
-      // Patch navigator.clipboard.writeText to record without OS handoff so
-      // the test is stable in headless harnesses.
-      (globalThis as unknown as { __vg_last_clip: string | null }).__vg_last_clip = null;
-      const orig = navigator.clipboard.writeText.bind(navigator.clipboard);
-      navigator.clipboard.writeText = async (s: string) => {
-        (globalThis as unknown as { __vg_last_clip: string | null }).__vg_last_clip = s;
+      // The tests config doesn't include DOM lib types — `navigator` is
+      // only available at runtime inside the page context. Cast through
+      // unknown so the type checker is happy while the runtime stays the
+      // same in-page navigator.
+      const g = globalThis as unknown as {
+        __vg_last_clip: string | null;
+        navigator: { clipboard: { writeText: (s: string) => Promise<void> } };
+      };
+      g.__vg_last_clip = null;
+      const orig = g.navigator.clipboard.writeText.bind(g.navigator.clipboard);
+      g.navigator.clipboard.writeText = async (s: string) => {
+        g.__vg_last_clip = s;
         try {
           await orig(s);
         } catch {
@@ -181,7 +187,9 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
 
     // Setting was persisted (settings.set echoes back through onChange).
     const persisted = await mainWindow.evaluate(async () => {
-      const s = await window.vg.settings.get();
+      // tsconfig.node.json doesn't expose `window` — work through globalThis.
+      const w = globalThis as unknown as { vg: { settings: { get: () => Promise<{ audio: { outputMuted: boolean } }> } } };
+      const s = await w.vg.settings.get();
       return s.audio.outputMuted;
     });
     expect(persisted).toBe(true);
@@ -194,7 +202,8 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
     await toggle.click();
     await expect(toggle).toHaveAttribute('data-muted', 'false');
     const after = await mainWindow.evaluate(async () => {
-      const s = await window.vg.settings.get();
+      const w = globalThis as unknown as { vg: { settings: { get: () => Promise<{ audio: { outputMuted: boolean } }> } } };
+      const s = await w.vg.settings.get();
       return s.audio.outputMuted;
     });
     expect(after).toBe(false);

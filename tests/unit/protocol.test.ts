@@ -139,6 +139,90 @@ describe('protocol — parseServerMessage', () => {
   it('rejects type with wrong field type', () => {
     expect(parseServerMessage({ type: 'transcript', turn_id: 1, text: 'x', final: true })).toBeNull();
   });
+
+  // ───── server message parser — extra rejection paths
+  it('rejects welcome missing capabilities', () => {
+    expect(
+      parseServerMessage({ type: 'welcome', session_id: 's', server_version: 'v' }),
+    ).toBeNull();
+  });
+
+  it('rejects welcome with non-string-array capabilities', () => {
+    expect(
+      parseServerMessage({
+        type: 'welcome',
+        session_id: 's',
+        server_version: 'v',
+        capabilities: ['ok', 7],
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects server transcript missing the final boolean', () => {
+    expect(
+      parseServerMessage({ type: 'transcript', turn_id: 't', text: 'olá' }),
+    ).toBeNull();
+  });
+
+  it('rejects thinking missing turn_id', () => {
+    expect(parseServerMessage({ type: 'thinking' })).toBeNull();
+  });
+
+  it('rejects response_text missing the final flag', () => {
+    expect(
+      parseServerMessage({ type: 'response_text', turn_id: 't', text: 'olá' }),
+    ).toBeNull();
+  });
+
+  it('rejects response_audio_chunk missing seq', () => {
+    expect(
+      parseServerMessage({
+        type: 'response_audio_chunk',
+        turn_id: 't',
+        format: 'pcm16_24khz',
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects response_audio_chunk with a non-number seq', () => {
+    expect(
+      parseServerMessage({
+        type: 'response_audio_chunk',
+        turn_id: 't',
+        seq: 'zero',
+        format: 'pcm16_24khz',
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects response_end missing turn_id', () => {
+    expect(parseServerMessage({ type: 'response_end' })).toBeNull();
+  });
+
+  it('rejects error frame missing the code field', () => {
+    expect(parseServerMessage({ type: 'error', message: 'oops' })).toBeNull();
+  });
+
+  it('rejects error frame missing the message field', () => {
+    expect(parseServerMessage({ type: 'error', code: 'X' })).toBeNull();
+  });
+
+  it('drops a non-string turn_id on error optional field', () => {
+    const r = parseServerMessage({ type: 'error', code: 'X', message: 'y', turn_id: 42 });
+    // Optional turn_id with the wrong shape is silently dropped — the
+    // contract is "if present, must be string" not "fail the whole frame".
+    expect(r).toEqual({ type: 'error', code: 'X', message: 'y' });
+  });
+
+  it('parses pong with an irrelevant payload (forward-compatible)', () => {
+    expect(parseServerMessage({ type: 'pong', extra: 'whatever' })).toEqual({ type: 'pong' });
+  });
+
+  it('rejects null + undefined + array roots', () => {
+    expect(parseServerMessage(null)).toBeNull();
+    expect(parseServerMessage(undefined)).toBeNull();
+    expect(parseServerMessage([])).toBeNull();
+  });
 });
 
 describe('protocol — negotiate', () => {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Mic, Headphones } from 'lucide-react';
 import { Button } from './Button';
 import { Logo } from './Logo';
@@ -32,6 +32,31 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
   const [mode, setMode] = useState<ActivationMode>('PUSH_TO_TALK');
   const [wakeWord, setWakeWord] = useState<WakeWord>('hey_jarvis');
   const [probe, setProbe] = useState<ProbeState>({ testing: false, result: null });
+  const [recentUrls, setRecentUrls] = useState<string[]>([]);
+  // We seed the URL field from settings once on mount. Subsequent changes
+  // are debounced back into settings.connection.draftUrl so a reload
+  // resumes where the user left off.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    void window.vg.settings.get().then((s) => {
+      const draft = s.connection?.draftUrl ?? '';
+      const recents = s.connection?.recentUrls ?? [];
+      const seed = draft.trim().length > 0 ? draft : (recents[0] ?? 'ws://');
+      setUrl(seed);
+      setRecentUrls(recents);
+      seededRef.current = true;
+    });
+  }, []);
+  // Debounced persistence of the URL draft so we don't thrash settings on
+  // every keystroke. 400 ms is plenty to feel responsive without spamming.
+  useEffect(() => {
+    if (!seededRef.current) return;
+    const handle = setTimeout(() => {
+      void window.vg.settings.set({ connection: { draftUrl: url } });
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [url]);
 
   const urlIsValid = useMemo(() => /^wss?:\/\/\S+/.test(url.trim()), [url]);
 
@@ -81,6 +106,7 @@ export function PairingWizard({ onComplete }: PairingWizardProps): JSX.Element {
             url={url}
             onUrl={setUrl}
             urlIsValid={urlIsValid}
+            recentUrls={recentUrls}
             onNext={() => setStep('token')}
           />
         )}
@@ -157,10 +183,11 @@ interface UrlStepProps {
   url: string;
   onUrl: (v: string) => void;
   urlIsValid: boolean;
+  recentUrls: string[];
   onNext: () => void;
 }
 
-function UrlStep({ url, onUrl, urlIsValid, onNext }: UrlStepProps): JSX.Element {
+function UrlStep({ url, onUrl, urlIsValid, recentUrls, onNext }: UrlStepProps): JSX.Element {
   return (
     <section className="mx-auto flex max-w-md flex-col gap-6">
       <header>
@@ -181,10 +208,36 @@ function UrlStep({ url, onUrl, urlIsValid, onNext }: UrlStepProps): JSX.Element 
           placeholder="ws://hermes.casa.lan:8765"
           aria-label="Endereço do bridge"
           aria-invalid={!urlIsValid}
+          list="bridge-url-history"
+          data-testid="url-input"
           className="h-12 rounded-xl border border-bg-subtle bg-bg-panel px-4 text-base text-white outline-none ring-accent/50 focus:border-accent focus:ring-2"
         />
+        {/* Suggest the last few bridges this user has paired with so
+            "I have two Hermes boxes" doesn't mean typing 30 chars twice. */}
+        {recentUrls.length > 0 && (
+          <datalist id="bridge-url-history" data-testid="bridge-url-history">
+            {recentUrls.map((u) => (
+              <option key={u} value={u} />
+            ))}
+          </datalist>
+        )}
         {!urlIsValid && url.length > 4 && (
           <span className="text-xs text-red-400">Tem de começar por ws:// ou wss://.</span>
+        )}
+        {recentUrls.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-[10px]" data-testid="recent-bridge-list">
+            {recentUrls.map((u) => (
+              <button
+                key={u}
+                type="button"
+                onClick={() => onUrl(u)}
+                className="rounded-full bg-bg-panel px-2 py-1 text-zinc-400 transition hover:bg-bg-subtle hover:text-zinc-200"
+                data-testid="recent-bridge-chip"
+              >
+                {u}
+              </button>
+            ))}
+          </div>
         )}
       </label>
       <div className="flex justify-end">

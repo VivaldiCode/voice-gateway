@@ -110,6 +110,10 @@ interface VgApi {
     prepare: () => Promise<{ ok: boolean; message?: string }>;
     onStatus: (cb: (s: TtsStatus) => void) => () => void;
   };
+  log: {
+    /** Reveal the electron-log file in the OS file manager. */
+    revealFile: () => Promise<{ ok: boolean; path: string; message?: string }>;
+  };
   wake: {
     testStart: (req: {
       mode: 'openww' | 'phrase';

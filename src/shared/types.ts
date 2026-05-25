@@ -110,6 +110,33 @@ export interface UiSettings {
   language: LanguageCode;
   theme: 'dark' | 'light' | 'system';
   startMinimized: boolean;
+  /**
+   * When true, the app registers itself as a macOS login item / Windows
+   * startup app via `app.setLoginItemSettings({ openAtLogin: true })`. When
+   * false the entry is removed. The setting is persisted; main reconciles
+   * the OS state on every change so the toggle is durable across launches.
+   */
+  autoLaunch: boolean;
+}
+
+/**
+ * Connection-level history & in-flight drafts. Kept separate from the
+ * "live" pairing so we can suggest recent URLs without leaking the
+ * current token.
+ */
+export interface ConnectionSettings {
+  /**
+   * Most-recently-paired bridge URLs, newest first. Capped at
+   * MAX_RECENT_BRIDGE_URLS. Surfaced as a `<datalist>` in the wizard's
+   * step-1 URL input.
+   */
+  recentUrls: string[];
+  /**
+   * If the user typed a URL in the wizard but didn't finish pairing,
+   * we remember it here so the next launch resumes where they left off.
+   * Cleared on pair success.
+   */
+  draftUrl: string;
 }
 
 export interface Settings {
@@ -119,6 +146,8 @@ export interface Settings {
   tts: TtsSettings;
   audio: AudioSettings;
   ui: UiSettings;
+  /** Pairing draft + recent-URL history. v4 schema. */
+  connection: ConnectionSettings;
   /** Bumped when the schema changes. Used by the store for migrations. */
   schemaVersion: number;
 }

@@ -129,6 +129,12 @@ const api = {
       ) => void,
     ): (() => void) => on(IPC.TTS_STATUS, cb),
   },
+
+  log: {
+    /** Reveal the electron-log file in the OS file manager. */
+    revealFile: (): Promise<{ ok: boolean; path: string; message?: string }> =>
+      ipcRenderer.invoke(IPC.LOG_REVEAL_FILE),
+  },
 } as const;
 
 contextBridge.exposeInMainWorld('vg', api);

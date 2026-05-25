@@ -68,7 +68,10 @@ describe('settings-store — schema migration', () => {
     expect(s.activation.wakeMode).toBe('openww');
     expect(s.activation.wakePhrase).toBe('hey hermes');
     expect(s.audio.outputMuted).toBe(false);
-    expect(s.schemaVersion).toBe(3);
+    expect(s.ui.autoLaunch).toBe(false);
+    expect(s.connection.recentUrls).toEqual([]);
+    expect(s.connection.draftUrl).toBe('');
+    expect(s.schemaVersion).toBe(4);
   });
 
   it('migrates a v1 file (no wakeMode/wakePhrase) into the current shape', () => {
@@ -117,20 +120,22 @@ describe('settings-store — schema migration', () => {
     expect(s.activation.wakeMode).toBe('openww');
     expect(s.activation.wakePhrase).toBe('hey hermes');
     expect(s.audio.outputMuted).toBe(false);
-    expect(s.schemaVersion).toBe(3);
+    expect(s.ui.autoLaunch).toBe(false);
+    expect(s.connection).toEqual({ recentUrls: [], draftUrl: '' });
+    expect(s.schemaVersion).toBe(4);
 
     // The migration is persisted back to disk so the next boot is fast.
     const onDisk = JSON.parse(readFileSync(storeFile(cwd), 'utf-8'));
-    expect(onDisk.settings.schemaVersion).toBe(3);
+    expect(onDisk.settings.schemaVersion).toBe(4);
     expect(onDisk.settings.activation.wakeMode).toBe('openww');
   });
 
-  it('migrates a v2 file (no audio.outputMuted) into v3 with mute=false', () => {
+  it('migrates a v2 file (no audio.outputMuted) into the current shape', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v2-'));
     const v2 = {
       settings: {
         ...defaultSettings(),
-        // strip the v3 field so the on-disk shape matches what v2 wrote
+        // strip the v3+ fields so the on-disk shape matches what v2 wrote
         audio: { inputDeviceId: 'mic-x', outputDeviceId: null } as unknown,
         schemaVersion: 2,
       },
@@ -141,7 +146,28 @@ describe('settings-store — schema migration', () => {
     const s = store.get();
     expect(s.audio.inputDeviceId).toBe('mic-x');
     expect(s.audio.outputMuted).toBe(false);
-    expect(s.schemaVersion).toBe(3);
+    expect(s.schemaVersion).toBe(4);
+  });
+
+  it('migrates a v3 file (no ui.autoLaunch / no connection) into v4 with the new defaults', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v3-'));
+    const v3 = {
+      settings: {
+        ...defaultSettings(),
+        // strip the v4 surfaces so the on-disk shape matches what v3 wrote
+        ui: { language: 'pt', theme: 'dark', startMinimized: false } as unknown,
+        connection: undefined as unknown,
+        schemaVersion: 3,
+      },
+    };
+    writeFileSync(storeFile(cwd), JSON.stringify(v3));
+
+    const store = createSettingsStore({ cwd });
+    const s = store.get();
+    expect(s.ui.autoLaunch).toBe(false);
+    expect(s.connection.recentUrls).toEqual([]);
+    expect(s.connection.draftUrl).toBe('');
+    expect(s.schemaVersion).toBe(4);
   });
 
   it('leaves a current-schema file untouched (no migration roundtrip)', () => {
@@ -176,7 +202,7 @@ describe('settings-store — schema migration', () => {
     expect(store.get().pairing).not.toBeNull();
     const after = store.reset();
     expect(after.pairing).toBeNull();
-    expect(after.schemaVersion).toBe(3);
+    expect(after.schemaVersion).toBe(4);
   });
 
   it('onChange listeners fire on set() and unregister cleanly', () => {

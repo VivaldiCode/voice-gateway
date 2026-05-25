@@ -1442,6 +1442,36 @@ function ConexaoTab({
 
 function AvancadoTab(): JSX.Element {
   const [confirming, setConfirming] = useState(false);
+  const [autoLaunch, setAutoLaunch] = useState<boolean>(false);
+  const [logPath, setLogPath] = useState<string | null>(null);
+
+  // Pick up the current autoLaunch flag on mount and stay in sync if it
+  // changes elsewhere (e.g. from another window or a settings reset).
+  useEffect(() => {
+    let cancelled = false;
+    void window.vg.settings.get().then((s) => {
+      if (!cancelled) setAutoLaunch(Boolean(s.ui?.autoLaunch));
+    });
+    const off = window.vg.settings.onChange((s) => {
+      setAutoLaunch(Boolean(s.ui?.autoLaunch));
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  const toggleAutoLaunch = useCallback(async () => {
+    const next = !autoLaunch;
+    setAutoLaunch(next); // optimistic
+    await window.vg.settings.set({ ui: { autoLaunch: next } });
+  }, [autoLaunch]);
+
+  const onRevealLog = useCallback(async () => {
+    const r = await window.vg.log.revealFile();
+    setLogPath(r.path);
+  }, []);
+
   const onReset = useCallback(async () => {
     await window.vg.settings.reset();
     setConfirming(false);
@@ -1450,6 +1480,42 @@ function AvancadoTab(): JSX.Element {
   }, []);
   return (
     <div className="flex flex-col gap-5">
+      <Section title="Arranque do sistema">
+        <label className="flex cursor-pointer items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-white">Abrir ao iniciar sessão</p>
+            <p className="text-xs text-zinc-500">
+              O Voice Gateway abre automaticamente quando o computador arranca.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            data-testid="auto-launch-toggle"
+            checked={autoLaunch}
+            onChange={toggleAutoLaunch}
+            className="h-4 w-4 accent-accent"
+          />
+        </label>
+      </Section>
+      <Section title="Diagnóstico">
+        <p className="text-xs text-zinc-500">
+          Abre o ficheiro de registo num explorador de ficheiros — útil para
+          reportar problemas.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" onClick={onRevealLog} data-testid="reveal-log-file">
+            Abrir registo de eventos
+          </Button>
+          {logPath && (
+            <code
+              data-testid="reveal-log-path"
+              className="truncate rounded bg-bg-panel px-2 py-1 text-[10px] text-zinc-400"
+            >
+              {logPath}
+            </code>
+          )}
+        </div>
+      </Section>
       <Section title="Factory reset">
         <p className="text-xs text-zinc-500">
           Apaga todas as definições (pairing, chaves API, vozes) e volta ao estado inicial.
