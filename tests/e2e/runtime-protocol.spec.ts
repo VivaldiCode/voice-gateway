@@ -262,6 +262,15 @@ test.describe('wake-event safety from non-rest states', () => {
   });
 
   test('wakeDetected() during CAPTURING is a no-op — state stays CAPTURING with the same turnId', async () => {
+    // Issue #30 (user-approved Option B): wake-event-during-CAPTURING
+    // assertion races the orchestrator's state pipeline on headless
+    // macOS — the FSM observably enters CAPTURING but the spec's
+    // post-wake-event assertion sees a stale state. Spec passes on dev
+    // macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     // Bridge does nothing — we only care about the FSM's reaction to the
     // wake event firing while the FSM is already in CAPTURING (i.e. mid-
     // utterance). This is the closest to the real "openwakeword fires

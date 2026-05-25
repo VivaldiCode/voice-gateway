@@ -117,6 +117,16 @@ test.describe('conversation advanced', () => {
 
   // ───── #42: server-side MP3 audio
   test('server-side MP3 chunks reach the renderer via tts_chunk', async () => {
+    // Issue #30 (user-approved Option B): on macos-latest headless Chromium
+    // the bridge → orchestrator → renderer state pipeline drops the
+    // SPEAKING transition under CPU pressure, so the chunk-count assertion
+    // races against a stale state log. Real fix tracked in #30; this skip
+    // keeps CI green while preserving local coverage (the spec passes on
+    // dev macOS in non-headless mode).
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     // Build a small fake MP3 payload — 32 bytes. We're testing the IPC path,
     // not the decoder; the renderer's AudioPlayback buffers MP3 chunks until
     // endUtterance() and then attempts decodeAudioData. decode may fail
@@ -164,6 +174,13 @@ test.describe('conversation advanced', () => {
 
   // ───── #43: transcript pane visual rendering
   test('two turns leave four alternating rows in the transcript pane', async () => {
+    // Issue #30 (user-approved Option B): same headless-state-pipeline race
+    // as #119 — the second turn's transcript row settles too late under
+    // CPU pressure. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     let turnCounter = 0;
     bridge = await startMockBridge({
       onClientMessage: (raw, send) => {
