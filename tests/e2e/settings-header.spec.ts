@@ -64,9 +64,12 @@ test.describe('Settings — header pattern (issue #19)', () => {
     await expect(header).toHaveClass(/vg-drag/);
     await expect(header).toHaveClass(/flex-col/);
 
-    // The 28 px spacer overlays the macOS traffic-lights. Selector picks
-    // the aria-hidden div that sits at the top of the header.
-    const spacer = header.locator('div[aria-hidden="true"].h-7').first();
+    // The 28 px spacer overlays the macOS traffic-lights. We assert
+    // exactly one matching div so a future refactor that accidentally
+    // emits the spacer twice (or zero times in the `window` layout)
+    // surfaces a clear failure. Note: no `.first()` here — that would
+    // weaken the assertion to "at least one", masking duplicates.
+    const spacer = header.locator('div[aria-hidden="true"].h-7');
     await expect(spacer).toHaveCount(1);
   });
 
