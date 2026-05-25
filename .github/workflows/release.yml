@@ -1,0 +1,50 @@
+# Release pipeline — builds + uploads the DMG when a `v*` tag is pushed.
+#
+# I7 + I10 (round 12): separate from ci.yml so PR runs don't cost a full
+# DMG build (which is slow + signs the bundle). Only fires when:
+#   - a tag like `v0.1.0` is pushed to the repo
+#   - someone manually dispatches the workflow (test the pipeline ad-hoc)
+#
+# Notes:
+#   - macOS code-signing is left as-is (currently identity=null in
+#     electron-builder.yml). To enable real signing later, attach the
+#     CSC_LINK + CSC_KEY_PASSWORD secrets and set NODE_ENV=production.
+#   - The DMG ends up in `release/`. We attach it to the GitHub Release
+#     created for the tag.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create the Release + upload assets
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build packaged .app + DMG
+        run: npm run build:mac
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voice-Gateway-${{ github.ref_name }}-arm64.dmg
+          path: release/*.dmg
+          retention-days: 30
+      - name: Create or update GitHub Release with DMG
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*.dmg
