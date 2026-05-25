@@ -10,18 +10,9 @@ import { TutorialOverlay } from './TutorialOverlay';
 import { useConversation } from '../hooks/useConversation';
 import { useAppStore } from '../store/app-store';
 import { cn } from '../lib/cn';
+import { useT } from '../i18n';
+import type { Dictionary } from '../i18n/pt';
 import type { SttStatus, TtsStatus } from '../global';
-
-/** Map FSM state → human-readable suffix shown in the window title bar. */
-const TITLE_SUFFIX: Record<string, string> = {
-  IDLE: 'Pronto',
-  LISTENING_WAKE: 'À escuta',
-  CAPTURING: 'A ouvir',
-  STREAMING: 'A transcrever',
-  THINKING: 'A pensar',
-  SPEAKING: 'A responder',
-  ERROR: 'Erro',
-};
 
 /** Mic permission states surfaced by the main process. 'unknown' is
  *  the state right after mount before the first `getMicStatus()` IPC
@@ -30,6 +21,7 @@ type MicPermissionState = 'granted' | 'denied' | 'restricted' | 'not-determined'
 
 /** Why the call button is disabled — surfaced as a tooltip + sr-only text. */
 function disabledReason(
+  t: Dictionary,
   connectionStatus: string,
   sttState: string,
   ttsState: string,
@@ -39,14 +31,14 @@ function disabledReason(
   if (state === 'ERROR') return null; // explicitly clickable for auto-recovery
   // Mic permission is the very first thing the app needs — surface it
   // before anything else so the user knows what to fix. (I1 round 12.)
-  if (micPermission === 'denied') return 'Sem permissão para o microfone — vai a Definições do sistema';
-  if (micPermission === 'restricted') return 'Microfone restrito por política do sistema';
-  if (micPermission === 'not-determined') return 'A pedir permissão do microfone…';
-  if (connectionStatus !== 'connected') return 'Sem ligação ao Hermes';
-  if (sttState === 'preparing') return 'Reconhecimento de voz a preparar…';
-  if (sttState === 'error') return 'Reconhecimento de voz com erro — vê Definições';
-  if (sttState !== 'ready') return 'Reconhecimento de voz ainda não pronto';
-  if (ttsState === 'error') return 'Voz com erro — vê Definições';
+  if (micPermission === 'denied') return t.disabledReason.micDenied;
+  if (micPermission === 'restricted') return t.disabledReason.micRestricted;
+  if (micPermission === 'not-determined') return t.disabledReason.micPending;
+  if (connectionStatus !== 'connected') return t.disabledReason.noConnection;
+  if (sttState === 'preparing') return t.disabledReason.sttPreparing;
+  if (sttState === 'error') return t.disabledReason.sttError;
+  if (sttState !== 'ready') return t.disabledReason.sttNotReady;
+  if (ttsState === 'error') return t.disabledReason.ttsError;
   return null;
 }
 
@@ -57,6 +49,7 @@ export interface MainScreenProps {
 
 export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.Element {
   const conv = useConversation();
+  const t = useT();
   const settings = useAppStore((s) => s.settings);
   const activationMode = settings?.activation.mode ?? 'PUSH_TO_TALK';
   const globalHotkey = settings?.activation.globalHotkey ?? 'CommandOrControl+Shift+H';
@@ -116,10 +109,11 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
   useEffect(() => {
     const doc = globalThis as unknown as { document?: { title: string } };
     if (doc.document) {
-      const suffix = TITLE_SUFFIX[conv.state] ?? 'Pronto';
-      doc.document.title = `Voice Gateway — ${suffix}`;
+      const suffix =
+        (t.state as Record<string, string>)[conv.state] ?? t.state.IDLE;
+      doc.document.title = t.app.windowTitle(suffix);
     }
-  }, [conv.state]);
+  }, [conv.state, t]);
 
   // Wake-word feedback flash: when state transitions LISTENING_WAKE →
   // CAPTURING (i.e. the runner just fired), nudge a transient "just woke"
@@ -180,7 +174,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
       const NotificationCtor = (globalThis as unknown as { Notification?: typeof Notification }).Notification;
       if (!NotificationCtor) return;
       if (NotificationCtor.permission === 'granted') {
-        new NotificationCtor('Hermes respondeu', {
+        new NotificationCtor(t.app.notificationReply, {
           body: lastAssistant.text.slice(0, 140),
           silent: true,
           tag: 'vg-reply',
@@ -194,7 +188,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
       // Notifications unavailable in this runtime (e.g. headless E2E
       // without --enable-features). Silent fallback is fine.
     }
-  }, [conv.state, conv.outputMuted, conv.transcript]);
+  }, [conv.state, conv.outputMuted, conv.transcript, t]);
 
   // Window-level keyboard shortcuts.
   // - Escape: dismiss the sticky error toast, OR if we're CAPTURING, cancel
@@ -235,7 +229,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         if (conv.transcript.length === 0) return; // nothing to save
         ev.preventDefault();
         const formatted = conv.transcript
-          .map((l) => `${l.role === 'user' ? 'Tu' : 'Hermes'}: ${l.text}`)
+          .map((l) => `${l.role === 'user' ? t.transcript.exportUser : t.transcript.exportAssistant}: ${l.text}`)
           .join('\n');
         void window.vg.transcript.export({
           text: formatted,
@@ -245,7 +239,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
     };
     w.addEventListener('keydown', handler as (e: unknown) => void);
     return () => w.removeEventListener('keydown', handler as (e: unknown) => void);
-  }, [conv, onOpenSettings]);
+  }, [conv, onOpenSettings, t]);
   const dotClass = cn(
     'h-2.5 w-2.5 rounded-full',
     conv.connection.status === 'connected'
@@ -304,8 +298,8 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
             <Button
               variant="ghost"
               size="sm"
-              aria-label={conv.outputMuted ? 'Voz mutada — clica para activar' : 'Mutar voz da Hermes'}
-              title={conv.outputMuted ? 'Voz mutada' : 'Mutar voz'}
+              aria-label={conv.outputMuted ? t.app.muteOn : t.app.muteOff}
+              title={conv.outputMuted ? t.app.muteTitleOn : t.app.muteTitleOff}
               onClick={() => conv.setOutputMuted(!conv.outputMuted)}
               data-testid="mute-toggle"
               data-muted={conv.outputMuted ? 'true' : 'false'}
@@ -320,7 +314,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Definições"
+              aria-label={t.app.settingsAria}
               onClick={onOpenSettings}
               data-testid="open-settings"
               className="vg-no-drag"
@@ -349,6 +343,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
           onOpenSettings={openMicSettings}
         />
         <CallButtonRow
+          t={t}
           state={conv.state}
           connectionStatus={conv.connection.status}
           sttState={conv.sttStatus.state}
@@ -376,7 +371,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
             conv.transcript.length > 0
               ? () => {
                   const formatted = conv.transcript
-                    .map((l) => `${l.role === 'user' ? 'Tu' : 'Hermes'}: ${l.text}`)
+                    .map((l) => `${l.role === 'user' ? t.transcript.exportUser : t.transcript.exportAssistant}: ${l.text}`)
                     .join('\n');
                   void navigator.clipboard.writeText(formatted);
                 }
@@ -407,7 +402,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
                   );
                 }}
               >
-                Tentar de novo
+                {t.errorToast.retry}
               </Button>
               <Button
                 size="sm"
@@ -424,7 +419,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
                   void navigator.clipboard.writeText(diagnostic);
                 }}
               >
-                Copiar diagnóstico
+                {t.errorToast.copyDiag}
               </Button>
             </div>
           </div>
@@ -440,6 +435,7 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
  * surface have a clear unit-of-testing.
  */
 function CallButtonRow({
+  t,
   state,
   connectionStatus,
   sttState,
@@ -449,6 +445,7 @@ function CallButtonRow({
   onRelease,
   onCancel,
 }: {
+  t: Dictionary;
   state: string;
   connectionStatus: string;
   sttState: string;
@@ -458,7 +455,7 @@ function CallButtonRow({
   onRelease: () => void;
   onCancel: () => void;
 }): JSX.Element {
-  const reason = disabledReason(connectionStatus, sttState, ttsState, state, micPermission);
+  const reason = disabledReason(t, connectionStatus, sttState, ttsState, state, micPermission);
   const disabled = reason !== null;
   return (
     <div className="flex items-center gap-3">
@@ -485,7 +482,7 @@ function CallButtonRow({
       {state === 'CAPTURING' && (
         <button
           type="button"
-          aria-label="Cancelar gravação"
+          aria-label={t.app.cancelCaptureAria}
           data-testid="cancel-capture"
           onClick={onCancel}
           className="flex h-10 w-10 items-center justify-center rounded-full bg-red-700/70 text-white shadow transition hover:bg-red-600"
@@ -511,6 +508,7 @@ function MicPermissionBanner({
   onRequest: () => void;
   onOpenSettings: () => void;
 }): JSX.Element | null {
+  const t = useT();
   if (permission === 'granted' || permission === 'unknown') return null;
   const isDenied = permission === 'denied' || permission === 'restricted';
   return (
@@ -521,14 +519,10 @@ function MicPermissionBanner({
       role="status"
     >
       <p className="font-medium">
-        {isDenied
-          ? 'O Voice Gateway precisa de permissão para usar o microfone.'
-          : 'Permissão do microfone ainda não confirmada.'}
+        {isDenied ? t.micPermission.deniedTitle : t.micPermission.pendingTitle}
       </p>
       <p className="text-xs text-amber-200/80">
-        {isDenied
-          ? 'Abre as Definições do sistema para autorizar o microfone — o botão de chamada só fica activo depois.'
-          : 'Carrega em Pedir permissão. Se o macOS já tiver respondido, a permissão aparece quando voltares à janela.'}
+        {isDenied ? t.micPermission.deniedBody : t.micPermission.pendingBody}
       </p>
       <div className="flex gap-2">
         {!isDenied && (
@@ -538,7 +532,7 @@ function MicPermissionBanner({
             data-testid="mic-permission-request"
             onClick={onRequest}
           >
-            Pedir permissão
+            {t.micPermission.request}
           </Button>
         )}
         <Button
@@ -547,7 +541,7 @@ function MicPermissionBanner({
           data-testid="mic-permission-open-settings"
           onClick={onOpenSettings}
         >
-          Abrir Definições do sistema
+          {t.micPermission.openSettings}
         </Button>
       </div>
     </div>
@@ -643,6 +637,7 @@ function HotkeyHint({
   wakeMode: 'openww' | 'phrase';
   wakeWord: string;
 }): JSX.Element {
+  const t = useT();
   const prettyHotkey = hotkey
     .replace(/CommandOrControl/, '⌘')
     .replace(/Cmd/, '⌘')
@@ -653,15 +648,15 @@ function HotkeyHint({
   const wakeLabel =
     activationMode === 'WAKE_WORD'
       ? wakeMode === 'phrase'
-        ? `ou diz «${wakePhrase}»`
-        : `ou diz «${wakeWord.replace(/_/g, ' ')}»`
-      : `ou usa ${prettyHotkey}`;
+        ? t.hotkeyHint.sayWakePhrase(wakePhrase)
+        : t.hotkeyHint.sayWakePhrase(wakeWord.replace(/_/g, ' '))
+      : t.hotkeyHint.orShortcut(prettyHotkey);
   return (
     <p
       data-testid="hotkey-hint"
       className="text-center text-[11px] text-zinc-500"
     >
-      Carrega no botão {wakeLabel}.
+      {t.hotkeyHint.template(wakeLabel)}
     </p>
   );
 }
@@ -752,6 +747,7 @@ function ConnectionIndicator({
   ttsStatus: TtsStatus;
   dotClass: string;
 }): JSX.Element {
+  const t = useT();
   const offline = connection.status !== 'connected';
   return (
     <button
@@ -763,7 +759,7 @@ function ConnectionIndicator({
       data-testid="connection-indicator"
       data-status={connection.status}
       data-clickable={offline ? 'true' : 'false'}
-      title={offline ? 'Clica para tentar ligar novamente' : 'Ligação activa'}
+      title={offline ? t.connection.retryTitle : t.connection.activeTitle}
       className={cn(
         'flex w-full items-center gap-2 px-5 pb-3 text-left text-xs text-zinc-400',
         offline
@@ -774,14 +770,14 @@ function ConnectionIndicator({
       <span className={dotClass} aria-hidden="true" />
       <span>
         {connection.status === 'connected'
-          ? `Ligado ${connection.latencyMs != null ? `(${connection.latencyMs} ms)` : ''}`
+          ? t.connection.connectedWithLatency(connection.latencyMs)
           : connection.status === 'connecting'
             ? connection.reconnectAttempt > 0
-              ? `A ligar… (tentativa ${connection.reconnectAttempt})`
-              : 'A ligar…'
+              ? t.connection.connectingAttempt(connection.reconnectAttempt)
+              : t.connection.connecting
             : connection.reconnectAttempt > 0
-              ? `Sem ligação (tentativa ${connection.reconnectAttempt}) — clica para tentar`
-              : 'Sem ligação — clica para tentar ligar'}
+              ? t.connection.disconnectedAttempt(connection.reconnectAttempt)
+              : t.connection.disconnectedClick}
       </span>
       {bridgeUrl && <span className="truncate text-zinc-600">• {bridgeUrl}</span>}
       <ReadinessPill sttStatus={sttStatus} ttsStatus={ttsStatus} />

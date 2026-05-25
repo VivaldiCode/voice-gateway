@@ -12,6 +12,13 @@ export interface Dictionary {
     muteOff: string;
     muteTitleOn: string;
     muteTitleOff: string;
+    /** Window title prefix — e.g. "Voice Gateway — {state}". */
+    windowTitle: (state: string) => string;
+    /** aria-label for the "X" button that aborts an in-flight capture. */
+    cancelCaptureAria: string;
+    /** Title of the desktop notification shown when an assistant reply
+     *  lands while the window is unfocused/hidden. */
+    notificationReply: string;
   };
   state: {
     IDLE: string;
@@ -38,10 +45,62 @@ export interface Dictionary {
     copy: string;
     clear: string;
     nMessages: (n: number) => string;
+    /** aria-labels for the action-bar icon buttons. */
+    copyAria: string;
+    clearAria: string;
+    /** Inline role chip rendered before each transcript line (lowercase). */
+    userPrefix: string;
+    assistantPrefix: string;
+    /** Capitalised role prefix used when exporting / copying the conversation
+     *  to plain text (Cmd+S, transcript-copy). */
+    exportUser: string;
+    exportAssistant: string;
   };
   errorToast: {
     retry: string;
     copyDiag: string;
+  };
+  micPermission: {
+    deniedTitle: string;
+    deniedBody: string;
+    pendingTitle: string;
+    pendingBody: string;
+    request: string;
+    openSettings: string;
+  };
+  hotkeyHint: {
+    /** "Press the button {wakeLabel}." */
+    template: (wakeLabel: string) => string;
+    sayWakePhrase: (phrase: string) => string;
+    orShortcut: (hotkey: string) => string;
+  };
+  connection: {
+    connectedWithLatency: (ms: number | null) => string;
+    connecting: string;
+    connectingAttempt: (n: number) => string;
+    disconnectedClick: string;
+    disconnectedAttempt: (n: number) => string;
+    activeTitle: string;
+    retryTitle: string;
+  };
+  tutorial: {
+    welcomeTitle: string;
+    welcomeBody: string;
+    pressTitle: string;
+    pressBody: string;
+    pressHint: string;
+    cancelTitle: string;
+    cancelBody: string;
+    cancelHint: string;
+    settingsTitle: string;
+    settingsBody: string;
+    settingsHint: string;
+    doneTitle: string;
+    doneBody: string;
+    skip: string;
+    back: string;
+    next: string;
+    start: string;
   };
   settings: {
     language: string;
@@ -59,6 +118,9 @@ export const pt: Dictionary = {
     muteOff: 'Mutar voz da Hermes',
     muteTitleOn: 'Voz mutada',
     muteTitleOff: 'Mutar voz',
+    windowTitle: (state) => `Voice Gateway — ${state}`,
+    cancelCaptureAria: 'Cancelar gravação',
+    notificationReply: 'Hermes respondeu',
   },
   state: {
     IDLE: 'Pronto',
@@ -84,11 +146,65 @@ export const pt: Dictionary = {
     emptyWake: 'Diz a palavra-chave ou usa o atalho para começar.',
     copy: 'copiar',
     clear: 'limpar',
-    nMessages: (n: number) => `${n} ${n === 1 ? 'mensagem' : 'mensagens'}`,
+    nMessages: (n) => `${n} ${n === 1 ? 'mensagem' : 'mensagens'}`,
+    copyAria: 'Copiar conversa',
+    clearAria: 'Limpar conversa',
+    userPrefix: 'tu',
+    assistantPrefix: 'hermes',
+    exportUser: 'Tu',
+    exportAssistant: 'Hermes',
   },
   errorToast: {
     retry: 'Tentar de novo',
     copyDiag: 'Copiar diagnóstico',
+  },
+  micPermission: {
+    deniedTitle: 'O Voice Gateway precisa de permissão para usar o microfone.',
+    deniedBody:
+      'Abre as Definições do sistema para autorizar o microfone — o botão de chamada só fica activo depois.',
+    pendingTitle: 'Permissão do microfone ainda não confirmada.',
+    pendingBody:
+      'Carrega em Pedir permissão. Se o macOS já tiver respondido, a permissão aparece quando voltares à janela.',
+    request: 'Pedir permissão',
+    openSettings: 'Abrir Definições do sistema',
+  },
+  hotkeyHint: {
+    template: (wakeLabel) => `Carrega no botão ${wakeLabel}.`,
+    sayWakePhrase: (phrase) => `ou diz «${phrase}»`,
+    orShortcut: (hotkey) => `ou usa ${hotkey}`,
+  },
+  connection: {
+    connectedWithLatency: (ms) => (ms != null ? `Ligado (${ms} ms)` : 'Ligado '),
+    connecting: 'A ligar…',
+    connectingAttempt: (n) => `A ligar… (tentativa ${n})`,
+    disconnectedClick: 'Sem ligação — clica para tentar ligar',
+    disconnectedAttempt: (n) => `Sem ligação (tentativa ${n}) — clica para tentar`,
+    activeTitle: 'Ligação activa',
+    retryTitle: 'Clica para tentar ligar novamente',
+  },
+  tutorial: {
+    welcomeTitle: 'Bem-vindo ao Voice Gateway 👋',
+    welcomeBody:
+      'Em três ecrãs ensino-te o básico. Demora menos de 30 segundos e podes saltar quando quiseres.',
+    pressTitle: 'Carrega no botão para falar',
+    pressBody:
+      'O grande botão violeta no centro da janela é o teu microfone. Mantém premido enquanto falas e larga quando acabares — o Hermes responde em segundos.',
+    pressHint: 'Em alternativa, usa o atalho global (configurado no setup).',
+    cancelTitle: 'O X cancela a meio',
+    cancelBody:
+      'Enquanto estás a falar, aparece um botão "×" pequenino ao lado do microfone. Carrega aí (ou prime Escape) para cancelar o turno sem enviar nada.',
+    cancelHint: 'Útil quando começas a dizer a coisa errada.',
+    settingsTitle: 'Tudo o resto vive em Definições',
+    settingsBody:
+      'Voz, microfone, palavra-chave, idioma, exportar conversa — tudo num painel acessível pelo ⚙ no canto. Atalho ⌘, abre directamente.',
+    settingsHint: 'Cmd+L limpa a conversa · Cmd+S exporta para ficheiro.',
+    doneTitle: 'Pronto! Diz olá ao Hermes.',
+    doneBody:
+      'Se mudares de ideias, podes voltar a abrir este tutorial em Definições → Avançado.',
+    skip: 'Saltar tutorial',
+    back: '← Anterior',
+    next: 'Seguinte →',
+    start: 'Começar',
   },
   settings: {
     language: 'Idioma',
