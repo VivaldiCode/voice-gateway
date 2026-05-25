@@ -97,6 +97,13 @@ test.describe('conversation flows — packaged app', () => {
 
   // ───── #20: barge-in mid-utterance
   test('barge-in during SPEAKING starts a new turn', async () => {
+    // Issue #30 (user-approved Option B): barge-in requires reaching
+    // SPEAKING first; the FSM transition is dropped on headless macOS.
+    // Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: (raw, send) => {
         const m = raw as { type?: string; turn_id?: string; text?: string; final?: boolean };
@@ -172,6 +179,14 @@ test.describe('conversation flows — packaged app', () => {
 
   // ───── #22: ERROR → PTT auto-recovery
   test('bridge error puts the FSM in ERROR; PTT recovers to CAPTURING', async () => {
+    // Issue #30 (user-approved Option B): the bridge-error frame fires on
+    // the mock bridge but the renderer's state log records IDLE rather
+    // than ERROR — the transition is dropped in transit on headless macOS
+    // CI. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: (raw, send) => {
         const m = raw as { type?: string; turn_id?: string };
