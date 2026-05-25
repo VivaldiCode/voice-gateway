@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Settings as SettingsIcon, Volume2 as VolumeOnIcon, VolumeX as VolumeOffIcon, X as XIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
@@ -22,14 +22,25 @@ const TITLE_SUFFIX: Record<string, string> = {
   ERROR: 'Erro',
 };
 
+/** Mic permission states surfaced by the main process. 'unknown' is
+ *  the state right after mount before the first `getMicStatus()` IPC
+ *  round-trip resolves; we treat it as a wait, not a block. */
+type MicPermissionState = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+
 /** Why the call button is disabled — surfaced as a tooltip + sr-only text. */
 function disabledReason(
   connectionStatus: string,
   sttState: string,
   ttsState: string,
   state: string,
+  micPermission: MicPermissionState,
 ): string | null {
   if (state === 'ERROR') return null; // explicitly clickable for auto-recovery
+  // Mic permission is the very first thing the app needs — surface it
+  // before anything else so the user knows what to fix. (I1 round 12.)
+  if (micPermission === 'denied') return 'Sem permissão para o microfone — vai a Definições do sistema';
+  if (micPermission === 'restricted') return 'Microfone restrito por política do sistema';
+  if (micPermission === 'not-determined') return 'A pedir permissão do microfone…';
   if (connectionStatus !== 'connected') return 'Sem ligação ao Hermes';
   if (sttState === 'preparing') return 'Reconhecimento de voz a preparar…';
   if (sttState === 'error') return 'Reconhecimento de voz com erro — vê Definições';
@@ -48,6 +59,57 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
   const settings = useAppStore((s) => s.settings);
   const activationMode = settings?.activation.mode ?? 'PUSH_TO_TALK';
   const globalHotkey = settings?.activation.globalHotkey ?? 'CommandOrControl+Shift+H';
+
+  // Mic permission gate (I1 round 12). The call button stays inert and
+  // the user gets a clear prompt until macOS reports 'granted'. We poll
+  // the status on mount + every time the window regains focus (the user
+  // may have just toggled the permission in System Preferences and come
+  // back), capped to 1s intervals so we don't hammer the IPC.
+  const [micPermission, setMicPermission] = useState<MicPermissionState>('unknown');
+  useEffect(() => {
+    let cancelled = false;
+    const check = async (): Promise<void> => {
+      try {
+        const s = await window.vg.audio.getMicStatus();
+        if (!cancelled) setMicPermission(s as MicPermissionState);
+      } catch {
+        // Best-effort — never block the renderer on a permission probe.
+      }
+    };
+    void check();
+    const w = globalThis as unknown as {
+      addEventListener: (e: string, cb: () => void) => void;
+      removeEventListener: (e: string, cb: () => void) => void;
+    };
+    const onFocus = (): void => void check();
+    w.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      w.removeEventListener('focus', onFocus);
+    };
+  }, []);
+  const requestMic = useCallback(async () => {
+    try {
+      await window.vg.audio.requestMic();
+    } finally {
+      // Re-probe regardless of result so the UI reflects whatever the
+      // OS landed on (granted, denied, still not-determined on rare
+      // races).
+      try {
+        const s = await window.vg.audio.getMicStatus();
+        setMicPermission(s as MicPermissionState);
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+  const openMicSettings = useCallback(async () => {
+    try {
+      await window.vg.audio.openMicSettings();
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Window title reflects FSM state — visible in Cmd+Tab / macOS Mission Control.
   useEffect(() => {
@@ -242,11 +304,17 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         data-just-woke={justWoke ? 'true' : 'false'}
       >
         <StateOrb state={conv.state} level={conv.level} />
+        <MicPermissionBanner
+          permission={micPermission}
+          onRequest={requestMic}
+          onOpenSettings={openMicSettings}
+        />
         <CallButtonRow
           state={conv.state}
           connectionStatus={conv.connection.status}
           sttState={conv.sttStatus.state}
           ttsState={conv.ttsStatus.state}
+          micPermission={micPermission}
           onPress={conv.pressTalk}
           onRelease={conv.releaseTalk}
           onCancel={conv.cancel}
@@ -337,6 +405,7 @@ function CallButtonRow({
   connectionStatus,
   sttState,
   ttsState,
+  micPermission,
   onPress,
   onRelease,
   onCancel,
@@ -345,11 +414,12 @@ function CallButtonRow({
   connectionStatus: string;
   sttState: string;
   ttsState: string;
+  micPermission: MicPermissionState;
   onPress: () => void;
   onRelease: () => void;
   onCancel: () => void;
 }): JSX.Element {
-  const reason = disabledReason(connectionStatus, sttState, ttsState, state);
+  const reason = disabledReason(connectionStatus, sttState, ttsState, state, micPermission);
   const disabled = reason !== null;
   return (
     <div className="flex items-center gap-3">
@@ -384,6 +454,63 @@ function CallButtonRow({
           <XIcon className="h-4 w-4" />
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Hero banner shown when the OS hasn't granted mic access yet. Replaces
+ * the call button area entirely until permission lands so the user has
+ * a clear next-action. (I1 round 12.)
+ */
+function MicPermissionBanner({
+  permission,
+  onRequest,
+  onOpenSettings,
+}: {
+  permission: MicPermissionState;
+  onRequest: () => void;
+  onOpenSettings: () => void;
+}): JSX.Element | null {
+  if (permission === 'granted' || permission === 'unknown') return null;
+  const isDenied = permission === 'denied' || permission === 'restricted';
+  return (
+    <div
+      data-testid="mic-permission-banner"
+      data-permission={permission}
+      className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-amber-700 bg-amber-950/40 px-5 py-4 text-center text-sm text-amber-100"
+      role="status"
+    >
+      <p className="font-medium">
+        {isDenied
+          ? 'O Voice Gateway precisa de permissão para usar o microfone.'
+          : 'Permissão do microfone ainda não confirmada.'}
+      </p>
+      <p className="text-xs text-amber-200/80">
+        {isDenied
+          ? 'Abre as Definições do sistema para autorizar o microfone — o botão de chamada só fica activo depois.'
+          : 'Carrega em Pedir permissão. Se o macOS já tiver respondido, a permissão aparece quando voltares à janela.'}
+      </p>
+      <div className="flex gap-2">
+        {!isDenied && (
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="mic-permission-request"
+            onClick={onRequest}
+          >
+            Pedir permissão
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          data-testid="mic-permission-open-settings"
+          onClick={onOpenSettings}
+        >
+          Abrir Definições do sistema
+        </Button>
+      </div>
     </div>
   );
 }
