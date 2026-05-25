@@ -65,6 +65,22 @@ export function headlessArgs(): readonly string[] {
   ];
 }
 
+/**
+ * CI-aware timeout knob. Returns `ci` when `process.env.CI` is set (GH
+ * Actions, CircleCI, etc. all set it), otherwise returns `local`. Used
+ * across the rig so dev iteration stays snappy (low timeouts surface
+ * regressions fast) while CI tolerates the slower macos-latest +
+ * headless-Chromium boot — the GH runner only has 2 vCPU and headless
+ * Chromium's BrowserWindow init can take 12-15 s under cold-cache CPU
+ * pressure (issue #18).
+ *
+ * Do not use this to paper over assertion failures — it's only for
+ * pure "wait for the OS / Chromium / Electron to do a thing" gates.
+ */
+export function ciTimeout(local: number, ci: number): number {
+  return process.env['CI'] ? ci : local;
+}
+
 export function vgTmpdir(): string {
   const override = process.env['VG_E2E_TMPDIR'];
   if (override && override.trim().length > 0) {
@@ -202,7 +218,9 @@ export async function launchUnpaired(
     executablePath: PACKAGED_EXEC,
     args,
     env: { ...process.env, VG_E2E: '1', ...opts.extraEnv },
-    timeout: 30_000,
+    // CI cold-boot for the packaged .app + Electron under load takes 30-45 s.
+    // Local runs typically settle in 5-8 s.
+    timeout: ciTimeout(30_000, 60_000),
   });
 
   if (process.env['VG_E2E_VERBOSE'] === '1') {
@@ -215,8 +233,12 @@ export async function launchUnpaired(
     );
   }
 
-  const mainWindow = await app.firstWindow({ timeout: 15_000 });
+  const mainWindow = await app.firstWindow({ timeout: ciTimeout(15_000, 45_000) });
   await mainWindow.waitForLoadState('domcontentloaded');
+  // unpaired path also benefits from early instrumentation — wizard
+  // flows can still observe state events after pairing completes.
+  await waitForVgReady(mainWindow);
+  await instrumentTtsCounter(mainWindow);
 
   let disposed = false;
   const dispose = async (): Promise<void> => {
@@ -262,7 +284,8 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     executablePath: PACKAGED_EXEC,
     args,
     env: { ...process.env, VG_E2E: '1', ...opts.extraEnv },
-    timeout: 30_000,
+    // CI cold-boot — see ciTimeout() doc.
+    timeout: ciTimeout(30_000, 60_000),
   });
 
   // Forward main-process stderr (electron-log writes there) when verbose.
@@ -280,7 +303,7 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     });
   }
 
-  const mainWindow = await app.firstWindow({ timeout: 15_000 });
+  const mainWindow = await app.firstWindow({ timeout: ciTimeout(15_000, 45_000) });
   // Forward EVERY console message during E2E. Verbosity is cheap and the
   // diagnostics save hours when a connection silently fails.
   const verboseConsole = process.env['VG_E2E_VERBOSE'] === '1';
@@ -296,6 +319,16 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     console.log(`[main pageerror] ${err.message}`);
   });
   await mainWindow.waitForLoadState('domcontentloaded');
+  // Auto-instrument the renderer EARLY so onState listeners attach
+  // before the FSM can transition. Round-12 issue #18 traced the
+  // wake-event flake to a race where the fake wake runner emitted
+  // 'wake' during the 15 s connection wait, BEFORE the spec called
+  // instrumentTtsCounter — so the LISTENING_WAKE→CAPTURING transition
+  // was missed and waitForState timed out with empty stateLog. Wiring
+  // listeners during launch removes the window entirely. Specs that
+  // still call instrumentTtsCounter() get a no-op (it's idempotent).
+  await waitForVgReady(mainWindow);
+  await instrumentTtsCounter(mainWindow);
 
   let disposed = false;
   const dispose = async (): Promise<void> => {
@@ -317,11 +350,38 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
 }
 
 /**
+ * Wait until the preload-exposed `window.vg.conversation` API is defined.
+ * Round-12 issue #18: on CI macos-latest with headless Chromium, there's
+ * a measurable window between `domcontentloaded` firing and the preload
+ * script finishing its contextBridge.exposeInMainWorld() calls. Calling
+ * `vg.conversation.onState(...)` before that finishes silently no-ops
+ * (the property is undefined), which is what makes instrumentTtsCounter
+ * "succeed" without actually attaching any listeners.
+ */
+export async function waitForVgReady(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const w = globalThis as unknown as {
+        vg?: { conversation?: { onState?: unknown } };
+      };
+      return Boolean(w.vg?.conversation?.onState);
+    },
+    undefined,
+    { timeout: ciTimeout(10_000, 30_000) },
+  );
+}
+
+/**
  * Open the dedicated Settings BrowserWindow via the same IPC that the gear
  * icon uses, wait for it to be ready, install standard log forwarding.
+ *
+ * The waitForEvent('window') timeout was 10 s historically — empirically
+ * too tight on the GH macos-latest runner under CPU pressure where a
+ * cold BrowserWindow open can take 12-15 s. ciTimeout bumps it to 30 s
+ * on CI without slowing local iteration. (Round-12 issue #18.)
  */
 export async function openSettingsWindow(rig: TestRig): Promise<Page> {
-  const open = rig.app.waitForEvent('window', { timeout: 10_000 });
+  const open = rig.app.waitForEvent('window', { timeout: ciTimeout(10_000, 30_000) });
   await rig.mainWindow.evaluate(() => {
     const w = globalThis as unknown as {
       vg: { settings: { openWindow: () => void } };
@@ -347,6 +407,14 @@ export async function openSettingsWindow(rig: TestRig): Promise<Page> {
  * Subscribe (in-page) to `vg.conversation.onTtsChunk` and stash chunk count
  * + total bytes on `window.__vg_tts_chunks` / `__vg_tts_bytes`. Resolves
  * once the listener is attached.
+ *
+ * Idempotent (round-12 issue #18): `launchPackaged` now auto-instruments
+ * during boot so listeners attach BEFORE any FSM transition can fire.
+ * Existing test calls to this function pass an `__vg_instrumented` flag
+ * check and become no-ops. Without the guard, calling twice would
+ * register duplicate listeners — fine for counting but it would also
+ * RESET the state log to empty, hiding any transitions captured during
+ * launch (which is exactly the bug we're fixing).
  */
 export async function instrumentTtsCounter(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -368,8 +436,11 @@ export async function instrumentTtsCounter(page: Page): Promise<void> {
       __vg_state_log?: Array<{ state: string; turnId: string | null }>;
       __vg_warnings?: string[];
       __vg_errors?: string[];
+      __vg_instrumented?: boolean;
     }
     const w = globalThis as unknown as W;
+    if (w.__vg_instrumented) return;
+    w.__vg_instrumented = true;
     w.__vg_tts_chunks = 0;
     w.__vg_tts_bytes = 0;
     w.__vg_state_log = [];
@@ -477,7 +548,11 @@ export async function waitForState(
   desired: ReadonlyArray<string>,
   opts: { timeoutMs?: number } = {},
 ): Promise<string> {
-  const timeoutMs = opts.timeoutMs ?? 10_000;
+  // Per-call timeout still wins (specs that need a tight bound — e.g.
+  // "should NOT transition within 500 ms" — keep their explicit value).
+  // Defaults bumped to 30 s on CI for headless-Chromium FSM latency.
+  // (Round-12 issue #18.)
+  const timeoutMs = opts.timeoutMs ?? ciTimeout(10_000, 30_000);
   const desiredSet = new Set(desired);
   const start = Date.now();
   let last: string = '';
@@ -500,8 +575,9 @@ export async function waitForState(
  * Trigger a wake event on the **fake** wake runner. Only valid when the app
  * was launched with `VG_WAKE_E2E_FAKE=1` and `activation.mode === 'WAKE_WORD'`.
  * The fake runner emits its wake autonomously after ~1.5 s — this helper
- * just waits for the FSM to land in CAPTURING.
+ * just waits for the FSM to land in CAPTURING. Default bumped to 15 s
+ * on CI for headless-Chromium boot latency (round-12 issue #18).
  */
-export async function waitForWake(page: Page, timeoutMs = 5_000): Promise<void> {
-  await waitForState(page, ['CAPTURING'], { timeoutMs });
+export async function waitForWake(page: Page, timeoutMs?: number): Promise<void> {
+  await waitForState(page, ['CAPTURING'], { timeoutMs: timeoutMs ?? ciTimeout(5_000, 15_000) });
 }
