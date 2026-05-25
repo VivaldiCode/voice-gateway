@@ -117,14 +117,19 @@ jobs:
         run: npm run build:mac
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-      - name: Run Playwright (headless, skip real-mic + audio specs)
+      - name: Run Playwright (headless, skip mic-dependent specs)
         env:
           VG_E2E_HEADLESS: '1'
         run: |
+          # Skip every spec that needs real microphone access — Playwright's
+          # `--grep-invert` matches against spec file names + test titles,
+          # so we name the actual specs. The four below all rely on
+          # --use-fake-device-for-media-stream OR a granted-mic permission
+          # the headless runner doesn't have.
           npx playwright test \
             --ignore-snapshots \
             --reporter=list \
-            --grep-invert='real-mic|audio-conversation'
+            --grep-invert='audio-conversation|mic-capture|wake-word|settings-audio'
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
