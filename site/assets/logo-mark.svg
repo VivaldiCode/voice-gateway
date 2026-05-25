@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#a48bff"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <!-- microphone glyph -->
+  <path d="M22 18v18a10 10 0 0 0 20 0V18a10 10 0 0 0-20 0Z" fill="white" opacity="0.92"/>
+  <rect x="30" y="40" width="4" height="10" rx="2" fill="white" opacity="0.92"/>
+  <rect x="22" y="50" width="20" height="3" rx="1.5" fill="white" opacity="0.92"/>
+</svg>
