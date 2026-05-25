@@ -143,6 +143,15 @@ test.describe('runtime extras', () => {
 
   // ───── #58: error toast contains the bridge message verbatim
   test('error toast surfaces the bridge error message exactly', async () => {
+    // Issue #30 (user-approved Option B): same headless-state-pipeline race
+    // as the other bridge-error specs. The mock bridge dispatches the
+    // error frame but the renderer's state log shows IDLE rather than
+    // ERROR, so the toast never renders before the assertion fires.
+    // Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     const distinctive = `simulated upstream failure ${Date.now()}`;
     bridge = await startMockBridge({
       onClientMessage: scriptedError({

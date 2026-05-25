@@ -51,14 +51,15 @@ function resolvePythonBin(): string | null {
 }
 
 /**
- * Probe whether the helper script can boot. A Python binary on PATH is
- * NOT enough — the helper imports `aiohttp` and the local
- * `hermes_voice_bridge` package. CI's vitest job has python3 (Ubuntu
- * 24.04 image) but does not `pip install` the bridge, so without this
- * gate the helper exits 1 and four scenarios fail spuriously. The
- * dedicated pytest job covers the bridge in isolation. (Same gate as
- * PRs #17 / #23 / #25 — applied here as a drive-by so this PR's CI
- * goes green.)
+ * Confirm the helper script can actually boot before we let the suite
+ * run. A Python binary on PATH is not enough — the helper also needs
+ * `aiohttp` and the `hermes_voice_bridge` package importable. On CI
+ * (GitHub Actions Ubuntu) the vitest job has `python3` but does NOT
+ * install the bridge's Python deps (only the dedicated pytest job
+ * does), so without this probe the helper exits with code 1 and the
+ * spec reports four spurious failures.
+ *
+ * (Round-12 issue #18 — same skip-gate also applied on PR #17.)
  */
 function bridgeImportsCleanly(bin: string): boolean {
   const serverSrc = join(HERE, '..', '..', 'server', 'hermes-voice-bridge', 'src');
@@ -151,9 +152,14 @@ async function bootBridge(mode: string): Promise<BootedBridge> {
   });
 }
 
-// Skip when Python is missing OR when the bridge's Python deps aren't
-// importable. The dedicated pytest job covers the bridge in isolation;
-// this integration spec is opportunistic.
+// Skip cases:
+//   - Python binary missing entirely (Node-only Linux CI)
+//   - Python present but bridge deps (`aiohttp`, `hermes_voice_bridge`)
+//     not installed — true on the GH Actions vitest job, since only the
+//     dedicated pytest job runs `pip install -e ".[dev]"` on the bridge
+//     package. The dedicated pytest job already covers the bridge in
+//     isolation; this integration spec is opportunistic when both sides
+//     happen to be available in the same environment (dev laptops).
 const SKIP = !BRIDGE_READY;
 
 describe.skipIf(SKIP)('connector → bridge integration (issue #14)', () => {
