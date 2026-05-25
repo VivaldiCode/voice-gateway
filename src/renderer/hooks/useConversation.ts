@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioCapture } from '../lib/audio-capture';
 import { AudioPlayback, type PlaybackFormat } from '../lib/audio-playback';
 import type { TranscriptLine } from '../components/TranscriptView';
@@ -39,6 +39,12 @@ export interface ConversationApi {
   bargeIn: () => void;
   /** Clear the local sticky error (e.g. via Escape key or the close button). */
   dismissError: () => void;
+  /** Wipe the transcript list locally — keeps the FSM untouched. */
+  clearTranscript: () => void;
+  /** Whether TTS audio is currently muted at the renderer playback layer. */
+  outputMuted: boolean;
+  /** Flip mute. Persists in settings.audio.outputMuted. */
+  setOutputMuted: (m: boolean) => void;
 }
 
 const INITIAL_CONNECTION: ConnectionDisplay = {
@@ -59,6 +65,7 @@ export function useConversation(): ConversationApi {
   const [level, setLevel] = useState(0);
   const [inputDeviceId, setInputDeviceId] = useState<string | null>(null);
   const [outputDeviceId, setOutputDeviceId] = useState<string | null>(null);
+  const [outputMuted, setOutputMutedState] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,10 +73,12 @@ export function useConversation(): ConversationApi {
       if (cancelled) return;
       setInputDeviceId(s.audio.inputDeviceId ?? null);
       setOutputDeviceId(s.audio.outputDeviceId ?? null);
+      setOutputMutedState(Boolean(s.audio.outputMuted));
     });
     const off = window.vg.settings.onChange((s) => {
       setInputDeviceId(s.audio.inputDeviceId ?? null);
       setOutputDeviceId(s.audio.outputDeviceId ?? null);
+      setOutputMutedState(Boolean(s.audio.outputMuted));
     });
     return () => {
       cancelled = true;
@@ -78,6 +87,15 @@ export function useConversation(): ConversationApi {
   }, []);
 
   const playback = useMemo(() => new AudioPlayback(), []);
+  // The TTS chunk handler is registered once below; it needs a *live* read
+  // of the mute flag rather than a closure capture from the first render.
+  const mutedRef = useRef(outputMuted);
+  useEffect(() => {
+    mutedRef.current = outputMuted;
+    // If the user flips mute mid-utterance, kill in-flight playback so they
+    // don't have to wait out the rest of the buffer.
+    if (outputMuted) playback.stop();
+  }, [outputMuted, playback]);
 
   // Push the user-chosen output device into the playback layer whenever it
   // changes. Idempotent — repeated calls with the same id are cheap.
@@ -108,6 +126,10 @@ export function useConversation(): ConversationApi {
       });
     });
     const offTts = window.vg.conversation.onTtsChunk((m) => {
+      // Mute is a renderer-side decision — the FSM still advances through
+      // SPEAKING so the orchestrator's lifecycle stays the same; we just
+      // refuse to push the audio buffers to the AudioContext.
+      if (mutedRef.current) return;
       const bytes = base64ToBytes(m.data);
       playback.pushChunk(bytes, m.format as PlaybackFormat);
     });
@@ -218,6 +240,14 @@ export function useConversation(): ConversationApi {
     cancel: () => window.vg.conversation.cancel(),
     bargeIn: () => window.vg.conversation.bargeIn(),
     dismissError: () => setError(null),
+    clearTranscript: () => setTranscript([]),
+    outputMuted,
+    setOutputMuted: (m: boolean) => {
+      // Optimistic local update — the settings.onChange listener will
+      // converge on the same value once main echoes it back.
+      setOutputMutedState(m);
+      void window.vg.settings.set({ audio: { outputMuted: m } });
+    },
   };
 }
 

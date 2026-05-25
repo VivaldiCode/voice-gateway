@@ -233,8 +233,8 @@ adds inline `<style>` tags.
 
 The E2E suite leans on a small set of `data-testid` attributes that
 the renderer treats as **public contract**. Don't rename them without
-updating the matching Playwright assertions — the suite (55 specs
-across 17 files) will fail loud.
+updating the matching Playwright assertions — the suite (60 specs
+across 18 files) will fail loud.
 
 | Test ID                       | Component        | What it surfaces                                   |
 |-------------------------------|------------------|----------------------------------------------------|
@@ -245,8 +245,10 @@ across 17 files) will fail loud.
 | `state-orb`                   | `StateOrb`       | Wrapper div. Also carries `data-state="…"` (the live FSM state) for visual assertions |
 | `transcript`                  | `TranscriptView` | The scroller container                             |
 | `transcript-empty`            | `TranscriptView` | The empty-state hint (mode-aware copy) — visible only when the transcript has no turns yet |
+| `transcript-count` / `transcript-copy` / `transcript-clear` | `TranscriptView` | Action bar above the transcript — N-mensagens chip, "copiar" (formatted clipboard dump), "limpar" (also bound to `Cmd+L`). Only render when the transcript has at least one turn. |
 | `transcript-user` / `transcript-assistant` | (rows in TranscriptView) | One per turn; lets specs assert ordering + text |
-| `connection-indicator`        | `MainScreen`     | "Ligado (N ms)" / "A ligar…" (with attempt counter) / "Sem ligação" |
+| `connection-indicator`        | `MainScreen`     | `<button>` carrying "Ligado (N ms)" / "A ligar…" (with attempt counter) / "Sem ligação". Carries `data-clickable="true"` while disconnected; clicking then asks main to `reconnectNow()`. |
+| `mute-toggle`                 | `MainScreen`     | Speaker icon in the header. Toggles `settings.audio.outputMuted`; the renderer drops every incoming TTS chunk while `data-muted="true"`. FSM is untouched. |
 | `warning-toast` / `error-toast` | `MainScreen`   | The `CommandHint` banners. `warning-toast` auto-dismisses after 4 s |
 | `tab-microfone` / `tab-voz` / `tab-ativacao` / `tab-avancado` etc. | `SettingsPanel` | One per tab in the Settings window |
 | `settings-saved-indicator`    | `SettingsPanel`  | Transient "Guardado" pill that flashes for ~1.2 s after a setting change reaches the renderer via `settings.onChange` |
@@ -273,6 +275,18 @@ visual-state changes without screenshot diffs:
 - `document.title` — suffixed with the friendly FSM state, e.g.
   `Voice Gateway — A captar áudio` or `… — A pensar`. Updated
   every transition; see `TITLE_SUFFIX` in `MainScreen.tsx`.
+
+### Window-level keyboard shortcuts
+
+`MainScreen.tsx` installs a single `keydown` listener with these
+contracts (all bound on Cmd-or-Ctrl):
+
+| Shortcut    | Behaviour                                                    |
+|-------------|--------------------------------------------------------------|
+| Escape      | Cancel CAPTURING if active, otherwise dismiss the error toast |
+| Cmd+,       | Open the Settings BrowserWindow (macOS standard)             |
+| Cmd+L       | Wipe the local transcript (new conversation; FSM untouched)  |
+| Cmd+R       | While in ERROR only: dismissError + auto press/release PTT to retry |
 
 ### `state-orb`'s `data-state` attribute
 

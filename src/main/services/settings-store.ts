@@ -8,9 +8,10 @@ import {
 } from '@shared/constants';
 import type { Settings } from '@shared/types';
 
-// v2: added activation.wakeMode + activation.wakePhrase. Old configs are
-// silently merged with the defaults on first boot.
-const SCHEMA_VERSION = 2;
+// v3: added audio.outputMuted. v2 added activation.wakeMode +
+// activation.wakePhrase. Old configs are silently merged with the
+// defaults on first boot.
+const SCHEMA_VERSION = 3;
 
 export function defaultSettings(): Settings {
   const isMac = process.platform === 'darwin';
@@ -41,7 +42,7 @@ export function defaultSettings(): Settings {
         modelId: 'eleven_turbo_v2_5',
       },
     },
-    audio: { inputDeviceId: null, outputDeviceId: null },
+    audio: { inputDeviceId: null, outputDeviceId: null, outputMuted: false },
     ui: { language: 'pt', theme: 'dark', startMinimized: false },
     schemaVersion: SCHEMA_VERSION,
   };

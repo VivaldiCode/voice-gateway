@@ -174,6 +174,121 @@ describe('HermesClient — integration with mock bridge', () => {
     expect(() => client.sendClientTranscript('t1', 'olá', true)).not.toThrow();
   });
 
+  it('reconnectNow() is a no-op before connect()', () => {
+    client = new HermesClient();
+    expect(() => client.reconnectNow()).not.toThrow();
+    expect(client.getStatus()).toBe('disconnected');
+  });
+
+  it('reconnectNow() is a no-op after explicit disconnect()', async () => {
+    client = new HermesClient();
+    client.connect({ url: bridge.url, token: MOCK_DEFAULT_TOKEN });
+    await onceEvent(client, 'welcome');
+    client.disconnect();
+    await waitFor(() => client.getStatus() === 'disconnected');
+    // The right invariant isn't "no status events" — disconnect() itself fires
+    // a 'disconnected' status. What matters is that reconnectNow() must NOT
+    // dial 'connecting' (i.e. open a new socket).
+    const later: string[] = [];
+    client.on('status', (s) => later.push(s));
+    client.reconnectNow();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(later).not.toContain('connecting');
+    expect(later).not.toContain('connected');
+  });
+
+  it('reconnectNow() while connected does not open a second socket', async () => {
+    client = new HermesClient();
+    client.connect({ url: bridge.url, token: MOCK_DEFAULT_TOKEN });
+    await onceEvent(client, 'welcome');
+    const before = bridge.connections.size;
+    client.reconnectNow();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(bridge.connections.size).toBe(before);
+  });
+
+  it('reconnectNow() shortcuts the exponential-backoff sleep after a forced close', async () => {
+    client = new HermesClient();
+    client.connect({ url: bridge.url, token: MOCK_DEFAULT_TOKEN });
+    const w1 = await onceEvent<MsgWelcome>(client, 'welcome');
+    expect(w1.type).toBe('welcome');
+    // Drop the live conn — client will schedule a backoff before reconnecting.
+    const conn = [...bridge.connections][0];
+    conn?.close();
+    await waitFor(() => client.getStatus() === 'disconnected');
+    // Without reconnectNow(), the first backoff is 500 ms. We yank it to 0:
+    client.reconnectNow();
+    const w2 = await onceEvent<MsgWelcome>(client, 'welcome');
+    expect(w2.type).toBe('welcome');
+  });
+
+  it('emits a client_error when the server sends invalid JSON', async () => {
+    client = new HermesClient();
+    client.connect({ url: bridge.url, token: MOCK_DEFAULT_TOKEN });
+    await onceEvent(client, 'welcome');
+    const errPromise = new Promise<[string, string]>((resolve) => {
+      client.once('client_error', ((code: string, message: string) => resolve([code, message])) as never);
+    });
+    const conn = [...bridge.connections][0];
+    if (!conn) throw new Error('no mock connection');
+    conn.send('not-json-at-all');
+    const [code, message] = await errPromise;
+    expect(code).toBe('WS_INVALID_MESSAGE');
+    expect(message).toMatch(/invalid json/i);
+  });
+
+  it('emits a client_error for a server frame with an unknown type', async () => {
+    client = new HermesClient();
+    client.connect({ url: bridge.url, token: MOCK_DEFAULT_TOKEN });
+    await onceEvent(client, 'welcome');
+    const errPromise = new Promise<[string, string]>((resolve) => {
+      client.once('client_error', ((code: string, message: string) => resolve([code, message])) as never);
+    });
+    const conn = [...bridge.connections][0];
+    if (!conn) throw new Error('no mock connection');
+    conn.send(JSON.stringify({ type: 'wat', payload: { not: 'real' } }));
+    const [code, message] = await errPromise;
+    expect(code).toBe('WS_INVALID_MESSAGE');
+    expect(message).toMatch(/unrecognised|server message/i);
+  });
+
+  it('uses the configured capabilities list in the hello frame', async () => {
+    const received: unknown[] = [];
+    const bridge2 = await startMockBridge({
+      onClientMessage: (msg) => received.push(msg),
+    });
+    try {
+      const c = new HermesClient({ capabilities: ['stt_cloud', 'tts_cloud'] });
+      c.connect({ url: bridge2.url, token: MOCK_DEFAULT_TOKEN });
+      await onceEvent(c, 'welcome');
+      const hello = received.find((m) => (m as { type: string }).type === 'hello') as
+        | { capabilities: string[] }
+        | undefined;
+      expect(hello?.capabilities).toEqual(['stt_cloud', 'tts_cloud']);
+      c.disconnect();
+    } finally {
+      await bridge2.close();
+    }
+  });
+
+  it('wsFactory that throws synchronously transitions to ERROR + schedules retry', async () => {
+    let calls = 0;
+    const explodingFactory = (() => {
+      calls += 1;
+      throw new Error('socket-init exploded');
+    }) as unknown as NonNullable<ConstructorParameters<typeof HermesClient>[0]>['wsFactory'];
+    const c = new HermesClient({ wsFactory: explodingFactory });
+    const errs: Array<[string, string]> = [];
+    c.on('client_error', ((code: string, msg: string) => errs.push([code, msg])) as never);
+    c.connect({ url: 'ws://127.0.0.1:1/ws', token: 't' });
+    // Wait for the first retry to fire too.
+    await new Promise((r) => setTimeout(r, 800));
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(errs.length).toBeGreaterThanOrEqual(1);
+    expect(errs[0]?.[1]).toMatch(/exploded/);
+    c.disconnect();
+  });
+
   it('sends start_turn / audio_chunk / end_turn through the wire', async () => {
     const received: unknown[] = [];
     const binaries: Buffer[] = [];

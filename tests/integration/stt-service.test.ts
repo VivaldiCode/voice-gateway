@@ -227,6 +227,177 @@ describe('WhisperLocalAdapter', () => {
   });
 });
 
+describe('WhisperLocalAdapter — additional coverage', () => {
+  let tmpDir: string;
+  const noPathLookup = async (): Promise<string | null> => null;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'vg-whisper-extra-'));
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('transcribe rejects with a friendly error when the binary is missing', async () => {
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'no-such-bin'),
+      config: { model: 'base' },
+      whichImpl: noPathLookup,
+    });
+    await expect(a.transcribe({ pcm: Buffer.alloc(0), language: 'pt' })).rejects.toThrow(
+      /pronto|prepare/i,
+    );
+  });
+
+  it('transcribe surfaces non-zero exit code + stderr tail', async () => {
+    await fs.mkdir(join(tmpDir, 'bin'), { recursive: true });
+    await fs.mkdir(join(tmpDir, 'models'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'bin', 'whisper'), '');
+    await fs.writeFile(join(tmpDir, 'models', 'ggml-base.bin'), '');
+
+    const fakeSpawn = (() => {
+      const stderr = new EventEmitter();
+      const proc = new EventEmitter() as EventEmitter & {
+        stdin: { end: (b?: Buffer) => void };
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+      };
+      proc.stdin = { end: () => undefined };
+      proc.stdout = new EventEmitter();
+      proc.stderr = stderr;
+      setImmediate(() => {
+        stderr.emit('data', Buffer.from('boom! model load failed\n'));
+        proc.emit('close', 9);
+      });
+      return proc;
+    }) as unknown as ConstructorParameters<typeof WhisperLocalAdapter>[0]['spawnImpl'];
+
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'bin', 'whisper'),
+      config: { model: 'base' },
+      whichImpl: noPathLookup,
+      spawnImpl: fakeSpawn,
+    });
+    await expect(a.transcribe({ pcm: Buffer.alloc(0), language: 'auto' })).rejects.toThrow(
+      /9.*boom/is,
+    );
+  });
+
+  it('transcribe surfaces spawn-throws synchronously as a rejection', async () => {
+    await fs.mkdir(join(tmpDir, 'bin'), { recursive: true });
+    await fs.mkdir(join(tmpDir, 'models'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'bin', 'whisper'), '');
+    await fs.writeFile(join(tmpDir, 'models', 'ggml-base.bin'), '');
+
+    const exploder = (() => {
+      throw new Error('ENOENT spawn');
+    }) as unknown as ConstructorParameters<typeof WhisperLocalAdapter>[0]['spawnImpl'];
+
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'bin', 'whisper'),
+      config: { model: 'base' },
+      whichImpl: noPathLookup,
+      spawnImpl: exploder,
+    });
+    await expect(a.transcribe({ pcm: Buffer.alloc(0), language: 'pt' })).rejects.toThrow(
+      /ENOENT/,
+    );
+  });
+
+  it('resolveModelPath + resolveBinaryPath expose discovery state for reuse', async () => {
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'bin', 'whisper'),
+      config: { model: 'tiny' },
+      whichImpl: async (cmd) => (cmd === 'whisper-cli' ? '/opt/whisper-cli' : null),
+    });
+    expect(a.resolveModelPath()).toBe(join(tmpDir, 'models', 'ggml-tiny.bin'));
+    expect(await a.resolveBinaryPath()).toBe('/opt/whisper-cli');
+    // second call hits the resolved-binary cache and returns the same value.
+    expect(await a.resolveBinaryPath()).toBe('/opt/whisper-cli');
+  });
+
+  it('prepare throws on an unknown model id even with binary present', async () => {
+    await fs.mkdir(join(tmpDir, 'bin'), { recursive: true });
+    await fs.writeFile(join(tmpDir, 'bin', 'whisper'), '');
+    const a = new WhisperLocalAdapter({
+      modelsDir: join(tmpDir, 'models'),
+      binaryPath: join(tmpDir, 'bin', 'whisper'),
+      // Cast: the field is typed but we deliberately pass an unknown value to
+      // exercise the runtime guard.
+      config: { model: 'mega-jumbo' as unknown as 'base' },
+      whichImpl: noPathLookup,
+      downloadFile: async () => undefined,
+    });
+    await expect(a.prepare()).rejects.toThrow(/modelo whisper desconhecido/i);
+  });
+});
+
+describe('OpenAIWhisperAdapter — additional coverage', () => {
+  it('prepare returns ok and emits ready progress when api key is set', async () => {
+    const a = new OpenAIWhisperAdapter({ apiKey: 'sk-test' });
+    const events: Array<{ stage: string }> = [];
+    await a.prepare((p) => events.push(p));
+    expect(events.at(-1)?.stage).toBe('ready');
+  });
+
+  it("transcribe omits the language form field when language === 'auto'", async () => {
+    let seenLanguage: FormDataEntryValue | null = null;
+    const fetchImpl = vi.fn(async (_url, init) => {
+      const body = (init as RequestInit).body as FormData;
+      seenLanguage = body.get('language');
+      return new Response(JSON.stringify({ text: 'ok' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const a = new OpenAIWhisperAdapter({
+      apiKey: 'k',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await a.transcribe({ pcm: Buffer.alloc(0), language: 'auto' });
+    expect(seenLanguage).toBeNull();
+  });
+
+  it('transcribe respects a custom endpoint override', async () => {
+    let seenUrl = '';
+    const fetchImpl = vi.fn(async (url) => {
+      seenUrl = String(url);
+      return new Response(JSON.stringify({ text: 'hi' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const a = new OpenAIWhisperAdapter({
+      apiKey: 'k',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      endpoint: 'https://example.com/v1/audio/transcriptions',
+    });
+    await a.transcribe({ pcm: Buffer.alloc(0), language: 'pt' });
+    expect(seenUrl).toBe('https://example.com/v1/audio/transcriptions');
+  });
+});
+
+describe('pcm16ToWav — edge cases', () => {
+  it('returns a 44-byte header for an empty PCM buffer', () => {
+    const wav = pcm16ToWav(Buffer.alloc(0), 24_000);
+    expect(wav.length).toBe(44);
+    expect(wav.readUInt32LE(40)).toBe(0);
+    expect(wav.readUInt32LE(24)).toBe(24_000);
+  });
+
+  it('accepts a Uint8Array (not just Buffer) and copies bytes verbatim', () => {
+    const u = new Uint8Array([10, 0, 20, 0]);
+    const wav = pcm16ToWav(u, 16_000);
+    expect(wav.length).toBe(44 + u.length);
+    expect(wav.readInt16LE(44)).toBe(10);
+    expect(wav.readInt16LE(46)).toBe(20);
+  });
+});
+
 describe('createSttAdapter', () => {
   const base: SttSettings = {
     provider: 'openai_whisper',

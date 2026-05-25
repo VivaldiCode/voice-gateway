@@ -49,6 +49,8 @@ const api = {
      *  up to 15 s for the next heartbeat-driven `onConnection` event. */
     getConnection: (): Promise<{ status: string; latencyMs: number | null; lastError: string | null; reconnectAttempt: number }> =>
       ipcRenderer.invoke(IPC.CONNECTION_STATUS_GET),
+    /** Ask main to force a reconnect right now. No-op while connected. */
+    reconnectNow: (): void => ipcRenderer.send(IPC.CONNECTION_RECONNECT_NOW),
     onHotkey: (cb: (phase: 'press' | 'release') => void): (() => void) => on(IPC.HOTKEY_TRIGGER, cb),
     pttPress: (): void => ipcRenderer.send(IPC.CONV_PTT_PRESS),
     pttRelease: (): void => ipcRenderer.send(IPC.CONV_PTT_RELEASE),

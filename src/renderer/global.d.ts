@@ -1,5 +1,13 @@
 import type { ElevenLabsConfig, PairingInfo, Settings } from '../shared/types';
 
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends object | null | undefined
+    ? T[K] extends null | undefined
+      ? T[K]
+      : DeepPartial<NonNullable<T[K]>> | null
+    : T[K];
+};
+
 export interface VoiceInfo {
   id: string;
   name: string;
@@ -46,7 +54,9 @@ interface VgApi {
   ping: () => Promise<'pong'>;
   settings: {
     get: () => Promise<Settings>;
-    set: (patch: Partial<Settings>) => Promise<Settings>;
+    /** Deep-partial patch — the store merges recursively, so nested partials like
+     *  `{ audio: { outputMuted: true } }` keep the other audio fields intact. */
+    set: (patch: DeepPartial<Settings>) => Promise<Settings>;
     reset: () => Promise<Settings>;
     onChange: (cb: (s: Settings) => void) => () => void;
     openWindow: () => void;
@@ -64,6 +74,8 @@ interface VgApi {
     onWarning: (cb: (m: { code: string; message: string }) => void) => () => void;
     onConnection: (cb: (m: { status: string; latencyMs: number | null; lastError: string | null; reconnectAttempt: number }) => void) => () => void;
     getConnection: () => Promise<{ status: string; latencyMs: number | null; lastError: string | null; reconnectAttempt: number }>;
+    /** Ask main to force a reconnect right now. No-op while connected. */
+    reconnectNow: () => void;
     onHotkey: (cb: (phase: 'press' | 'release') => void) => () => void;
     pttPress: () => void;
     pttRelease: () => void;

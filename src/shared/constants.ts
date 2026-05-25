@@ -57,6 +57,9 @@ export const IPC = {
   /** Sync getter — the renderer asks for the current snapshot on mount so it
    *  doesn't have to wait up to 15 s for the next heartbeat-driven event. */
   CONNECTION_STATUS_GET: 'vg:connection:status:get',
+  /** Renderer asks main to force a reconnect now (e.g. user clicks the
+   *  connection indicator). No-op if already connected or no pairing. */
+  CONNECTION_RECONNECT_NOW: 'vg:connection:reconnect-now',
   CONVERSATION_EVENT: 'vg:conversation:event',
   CONVERSATION_COMMAND: 'vg:conversation:command',
   AUDIO_DEVICES_LIST: 'vg:audio:devices',

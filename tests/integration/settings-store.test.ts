@@ -67,10 +67,11 @@ describe('settings-store — schema migration', () => {
     expect(s.pairing).toBeNull();
     expect(s.activation.wakeMode).toBe('openww');
     expect(s.activation.wakePhrase).toBe('hey hermes');
-    expect(s.schemaVersion).toBe(2);
+    expect(s.audio.outputMuted).toBe(false);
+    expect(s.schemaVersion).toBe(3);
   });
 
-  it('migrates a v1 file (no wakeMode/wakePhrase) into the v2 shape', () => {
+  it('migrates a v1 file (no wakeMode/wakePhrase) into the current shape', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v1-'));
     // v1: an older app version that didn't know about wakeMode + wakePhrase.
     const v1 = {
@@ -112,27 +113,47 @@ describe('settings-store — schema migration', () => {
     expect(s.activation.minAudioMs).toBe(400);
     expect(s.stt.language).toBe('pt');
 
-    // …and filled in the v2-only fields with defaults.
+    // …and filled in the newer-schema fields with defaults.
     expect(s.activation.wakeMode).toBe('openww');
     expect(s.activation.wakePhrase).toBe('hey hermes');
-    expect(s.schemaVersion).toBe(2);
+    expect(s.audio.outputMuted).toBe(false);
+    expect(s.schemaVersion).toBe(3);
 
     // The migration is persisted back to disk so the next boot is fast.
     const onDisk = JSON.parse(readFileSync(storeFile(cwd), 'utf-8'));
-    expect(onDisk.settings.schemaVersion).toBe(2);
+    expect(onDisk.settings.schemaVersion).toBe(3);
     expect(onDisk.settings.activation.wakeMode).toBe('openww');
   });
 
-  it('leaves a v2 file untouched (no migration roundtrip)', () => {
+  it('migrates a v2 file (no audio.outputMuted) into v3 with mute=false', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-v2-'));
-    const userPhrase = 'do something different';
     const v2 = {
+      settings: {
+        ...defaultSettings(),
+        // strip the v3 field so the on-disk shape matches what v2 wrote
+        audio: { inputDeviceId: 'mic-x', outputDeviceId: null } as unknown,
+        schemaVersion: 2,
+      },
+    };
+    writeFileSync(storeFile(cwd), JSON.stringify(v2));
+
+    const store = createSettingsStore({ cwd });
+    const s = store.get();
+    expect(s.audio.inputDeviceId).toBe('mic-x');
+    expect(s.audio.outputMuted).toBe(false);
+    expect(s.schemaVersion).toBe(3);
+  });
+
+  it('leaves a current-schema file untouched (no migration roundtrip)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'vg-settings-current-'));
+    const userPhrase = 'do something different';
+    const current = {
       settings: {
         ...defaultSettings(),
         activation: { ...defaultSettings().activation, wakePhrase: userPhrase },
       },
     };
-    writeFileSync(storeFile(cwd), JSON.stringify(v2));
+    writeFileSync(storeFile(cwd), JSON.stringify(current));
 
     const store = createSettingsStore({ cwd });
     expect(store.get().activation.wakePhrase).toBe(userPhrase);
@@ -155,7 +176,7 @@ describe('settings-store — schema migration', () => {
     expect(store.get().pairing).not.toBeNull();
     const after = store.reset();
     expect(after.pairing).toBeNull();
-    expect(after.schemaVersion).toBe(2);
+    expect(after.schemaVersion).toBe(3);
   });
 
   it('onChange listeners fire on set() and unregister cleanly', () => {

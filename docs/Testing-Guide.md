@@ -204,7 +204,7 @@ npm run build:mac          # produce release/*.dmg
 npm run test:e2e
 ```
 
-Currently covers **55 tests across 17 spec files** (~3 min wall-clock,
+Currently covers **60 tests across 18 spec files** (~3 min wall-clock,
 single worker):
 
 - Pairing wizard happy path + 3-step navigation + cancel-on-step-2 +
@@ -221,7 +221,9 @@ single worker):
 - Window-chrome UX: window-title FSM suffix, Cancel X during
   CAPTURING, hotkey hint per activation mode, "Guardado" indicator
   flash, ReadinessPill, error-toast Copy Diagnostics + Escape, tray
-  menu with Cmd+, opening Settings.
+  menu with Cmd+, opening Settings, **Cmd+L wipes transcript**,
+  **Cmd+R retries after ERROR**, **transcript copy + counter chips**,
+  **click connection indicator to reconnect**, **mute toggle**.
 - Re-pair to a different bridge mid-session and recover; reconnect
   after the server bounces the socket; capability negotiation
   (`hello` + `welcome` shape).
@@ -391,12 +393,13 @@ Format: mono PCM16 @ 16 kHz, which is what `whisper-cli` expects.
 ### Coverage baseline (`npm run coverage`)
 
 ```
-All files       | 80.96 % stmts | 82.70 % branches | 88.27 % funcs
-src/shared      | 97.01 % stmts
-src/main/services | 75.99 % stmts
+All files       | 82.36 % stmts | 84.57 % branches | 89.18 % funcs
+src/shared      | 96.82 % stmts
+src/main/services | 77.85 % stmts
   conversation-orchestrator.ts | 86.17 % stmts
-  hermes-client.ts             | 83.61 % stmts
+  hermes-client.ts             | 89.76 % stmts
   settings-store.ts            |  100   % stmts
+  stt-service.ts               | 78.11 % stmts
   tts-service.ts               | 65.37 % stmts
   wake-word-service.ts         | 59.67 % stmts
 ```
@@ -412,7 +415,7 @@ heavier mock layer; the E2E suite is the right place to catch them.
 The `types.ts` declaration file is intentionally excluded from the
 coverage report — it has no runtime statements and would appear as 0 %.
 
-### What the suite currently covers (55 specs across 17 files)
+### What the suite currently covers (60 specs across 18 files)
 
 ```
 tests/e2e/
@@ -438,6 +441,9 @@ tests/e2e/
 │                                       CAPTURING, data-just-woke wake flash,
 │                                       hotkey-hint mode-aware, "Guardado" flash,
 │                                       wizard step label + cancel link (7)
+├── ux-round9.spec.ts                   Cmd+L clears transcript, Cmd+R retry-from-
+│                                       ERROR, copy/clear chips + turn counter,
+│                                       click-to-reconnect indicator, mute toggle (5)
 ├── ux-shortcuts.spec.ts                Escape dismisses error toast,
 │                                       Cmd+, opens Settings, "Copiar diagnóstico"
 │                                       button, ReadinessPill, token paste trim (5)
@@ -448,7 +454,7 @@ tests/e2e/
                                         token field is multi-line monospace (2)
 ```
 
-55 specs totalling ~3 minutes for a full local run. The real-audio one
+60 specs totalling ~3 minutes for a full local run. The real-audio one
 is the only slow case (~20 s — STT + Piper warmup); everything else is
 <3 s each thanks to the fake STT / fake wake runner / mock bridge stack.
 

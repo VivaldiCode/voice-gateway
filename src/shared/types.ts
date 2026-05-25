@@ -97,6 +97,13 @@ export interface ActivationSettings {
 export interface AudioSettings {
   inputDeviceId: string | null;
   outputDeviceId: string | null;
+  /**
+   * When true, the renderer's `AudioPlayback` silently drops every TTS chunk
+   * for the current and future turns. The conversation FSM still advances
+   * (THINKING → SPEAKING → IDLE) — only the audio output is suppressed. The
+   * user toggles this from the header speaker icon. Default `false`.
+   */
+  outputMuted: boolean;
 }
 
 export interface UiSettings {

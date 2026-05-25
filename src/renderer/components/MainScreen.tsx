@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Settings as SettingsIcon, X as XIcon } from 'lucide-react';
+import { Settings as SettingsIcon, Volume2 as VolumeOnIcon, VolumeX as VolumeOffIcon, X as XIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
 import { CommandHint } from './CommandHint';
@@ -95,6 +95,11 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
   // - Escape: dismiss the sticky error toast, OR if we're CAPTURING, cancel
   //   the in-flight turn so the user doesn't have to find a button.
   // - Cmd+,: open the Settings window — macOS standard shortcut.
+  // - Cmd+L: wipe the transcript locally (a "new conversation").
+  // - Cmd+R: only when in ERROR, dismiss + immediately retry by pressing
+  //   PTT so the orchestrator's ERROR → CAPTURING auto-recovery fires
+  //   without the user having to aim at the button. Browser refresh stays
+  //   blocked anyway because contextIsolation strips the reload binding.
   useEffect(() => {
     const w = globalThis as unknown as {
       addEventListener: (e: string, cb: (ev: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }) => void) => void;
@@ -107,6 +112,20 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
       } else if (ev.key === ',' && (ev.metaKey || ev.ctrlKey)) {
         ev.preventDefault();
         onOpenSettings();
+      } else if ((ev.key === 'l' || ev.key === 'L') && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        conv.clearTranscript();
+      } else if ((ev.key === 'r' || ev.key === 'R') && (ev.metaKey || ev.ctrlKey)) {
+        if (conv.state !== 'ERROR') return; // let Cmd+R behave normally otherwise
+        ev.preventDefault();
+        conv.dismissError();
+        conv.pressTalk();
+        // Release after a tick so the orchestrator's auto-recovery fires
+        // and the new turn starts capturing.
+        (globalThis as unknown as { setTimeout: (cb: () => void, ms: number) => number }).setTimeout(
+          () => conv.releaseTalk(),
+          50,
+        );
       }
     };
     w.addEventListener('keydown', handler as (e: unknown) => void);
@@ -129,36 +148,42 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         className="vg-drag flex items-center justify-between gap-2 pr-3 pl-[88px] pt-4 pb-2 [&_button]:vg-no-drag"
       >
         <Logo size={28} wordmark />
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Definições"
-          onClick={onOpenSettings}
-          data-testid="open-settings"
-          className="vg-no-drag"
-        >
-          <SettingsIcon className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={conv.outputMuted ? 'Voz mutada — clica para activar' : 'Mutar voz da Hermes'}
+            title={conv.outputMuted ? 'Voz mutada' : 'Mutar voz'}
+            onClick={() => conv.setOutputMuted(!conv.outputMuted)}
+            data-testid="mute-toggle"
+            data-muted={conv.outputMuted ? 'true' : 'false'}
+            className="vg-no-drag"
+          >
+            {conv.outputMuted ? (
+              <VolumeOffIcon className="h-4 w-4 text-red-400" />
+            ) : (
+              <VolumeOnIcon className="h-4 w-4" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Definições"
+            onClick={onOpenSettings}
+            data-testid="open-settings"
+            className="vg-no-drag"
+          >
+            <SettingsIcon className="h-4 w-4" />
+          </Button>
+        </div>
       </header>
-      <div
-        className="flex items-center gap-2 px-5 pb-3 text-xs text-zinc-400"
-        data-testid="connection-indicator"
-      >
-        <span className={dotClass} aria-hidden="true" />
-        <span>
-          {conv.connection.status === 'connected'
-            ? `Ligado ${conv.connection.latencyMs != null ? `(${conv.connection.latencyMs} ms)` : ''}`
-            : conv.connection.status === 'connecting'
-              ? conv.connection.reconnectAttempt > 0
-                ? `A ligar… (tentativa ${conv.connection.reconnectAttempt})`
-                : 'A ligar…'
-              : conv.connection.reconnectAttempt > 0
-                ? `Sem ligação (tentativa ${conv.connection.reconnectAttempt})`
-                : 'Sem ligação'}
-        </span>
-        {bridgeUrl && <span className="truncate text-zinc-600">• {bridgeUrl}</span>}
-        <ReadinessPill sttStatus={conv.sttStatus} ttsStatus={conv.ttsStatus} />
-      </div>
+      <ConnectionIndicator
+        connection={conv.connection}
+        bridgeUrl={bridgeUrl}
+        sttStatus={conv.sttStatus}
+        ttsStatus={conv.ttsStatus}
+        dotClass={dotClass}
+      />
 
       <main
         className="flex flex-1 flex-col items-center justify-center gap-8 px-6"
@@ -183,7 +208,19 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         />
         <TranscriptView
           lines={conv.transcript.slice(-10)}
+          totalTurns={conv.transcript.length}
           activationMode={activationMode}
+          onClear={conv.transcript.length > 0 ? conv.clearTranscript : undefined}
+          onCopy={
+            conv.transcript.length > 0
+              ? () => {
+                  const formatted = conv.transcript
+                    .map((l) => `${l.role === 'user' ? 'Tu' : 'Hermes'}: ${l.text}`)
+                    .join('\n');
+                  void navigator.clipboard.writeText(formatted);
+                }
+              : undefined
+          }
         />
         <SttStatusBanner status={conv.sttStatus} />
         {conv.warning && (
@@ -387,6 +424,62 @@ function labelFor(prefix: 'STT' | 'Voz', s: SttStatus | TtsStatus): string {
     default:
       return `${prefix}: —`;
   }
+}
+
+/**
+ * Connection status row — also doubles as a "reconnect now" button when the
+ * client isn't connected. Clicking while connected is a no-op (cheap, since
+ * main's reconnectNow() bails early). The role + cursor switch only kick in
+ * while disconnected/connecting to keep the resting UI calm.
+ */
+function ConnectionIndicator({
+  connection,
+  bridgeUrl,
+  sttStatus,
+  ttsStatus,
+  dotClass,
+}: {
+  connection: { status: string; latencyMs: number | null; reconnectAttempt: number };
+  bridgeUrl: string | null;
+  sttStatus: SttStatus;
+  ttsStatus: TtsStatus;
+  dotClass: string;
+}): JSX.Element {
+  const offline = connection.status !== 'connected';
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (offline) window.vg.conversation.reconnectNow();
+      }}
+      disabled={!offline}
+      data-testid="connection-indicator"
+      data-status={connection.status}
+      data-clickable={offline ? 'true' : 'false'}
+      title={offline ? 'Clica para tentar ligar novamente' : 'Ligação activa'}
+      className={cn(
+        'flex w-full items-center gap-2 px-5 pb-3 text-left text-xs text-zinc-400',
+        offline
+          ? 'cursor-pointer hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent'
+          : 'cursor-default',
+      )}
+    >
+      <span className={dotClass} aria-hidden="true" />
+      <span>
+        {connection.status === 'connected'
+          ? `Ligado ${connection.latencyMs != null ? `(${connection.latencyMs} ms)` : ''}`
+          : connection.status === 'connecting'
+            ? connection.reconnectAttempt > 0
+              ? `A ligar… (tentativa ${connection.reconnectAttempt})`
+              : 'A ligar…'
+            : connection.reconnectAttempt > 0
+              ? `Sem ligação (tentativa ${connection.reconnectAttempt}) — clica para tentar`
+              : 'Sem ligação — clica para tentar ligar'}
+      </span>
+      {bridgeUrl && <span className="truncate text-zinc-600">• {bridgeUrl}</span>}
+      <ReadinessPill sttStatus={sttStatus} ttsStatus={ttsStatus} />
+    </button>
+  );
 }
 
 function SttStatusBanner({ status }: { status: SttStatus }): JSX.Element | null {

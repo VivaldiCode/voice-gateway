@@ -101,6 +101,18 @@ changes (new fields pick up defaults; existing fields stay). For
 **breaking** renames you'd add a per-version transformer before the
 merge — none have been needed so far.
 
+### Schema version history
+
+| Version | What it added |
+|---------|---------------|
+| 1       | Initial release (pairing, activation, stt, tts, audio, ui). |
+| 2       | `activation.wakeMode` + `activation.wakePhrase` for custom-phrase wake-word mode. |
+| 3       | `audio.outputMuted` — renderer-side TTS mute toggle persisted across launches. |
+
+Each bump is purely additive — old files survive the merge above and
+just gain the new fields with their default values. Tests in
+`tests/integration/settings-store.test.ts` cover every migration path.
+
 ## The pub/sub
 
 `createSettingsStore()` returns a `SettingsStore`:

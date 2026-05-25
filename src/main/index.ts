@@ -543,6 +543,14 @@ ipcMain.on(IPC.CONV_RESET, () => orchestrator?.reset());
 
 ipcMain.handle(IPC.CONNECTION_STATUS_GET, async () => lastConnectionInfo);
 
+// Renderer-driven "reconnect now" — fires from the connection indicator
+// click in MainScreen. Safe to call any time: no-op if already connected
+// or no pairing exists.
+ipcMain.on(IPC.CONNECTION_RECONNECT_NOW, () => {
+  log.info('[VG] reconnect-now requested by renderer');
+  client?.reconnectNow();
+});
+
 ipcMain.handle(
   IPC.WAKE_TEST_START,
   async (
