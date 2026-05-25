@@ -194,39 +194,53 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
 
   return (
     <div className="flex h-full flex-col">
-      {/* macOS hiddenInset traffic lights live at top-left of the window.
-          The `vg-drag` region also makes the header act as a window drag handle. */}
+      {/* macOS hiddenInset traffic lights live at top-left of the window
+          inside the first ~75x28 px region. We split the header into two
+          rows so the logo + our action buttons never visually fight the
+          OS traffic lights — top row is the drag handle (just height to
+          clear them), bottom row holds the wordmark + controls.
+          B2 (round 12): previously these were all on the same line +
+          pl-[88px] which made the logo collide with the maximize button
+          on narrow window widths. */}
       <header
-        className="vg-drag flex items-center justify-between gap-2 pr-3 pl-[88px] pt-4 pb-2 [&_button]:vg-no-drag"
+        className="vg-drag flex flex-col gap-0 [&_button]:vg-no-drag"
+        data-testid="app-header"
       >
-        <Logo size={28} wordmark />
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={conv.outputMuted ? 'Voz mutada — clica para activar' : 'Mutar voz da Hermes'}
-            title={conv.outputMuted ? 'Voz mutada' : 'Mutar voz'}
-            onClick={() => conv.setOutputMuted(!conv.outputMuted)}
-            data-testid="mute-toggle"
-            data-muted={conv.outputMuted ? 'true' : 'false'}
-            className="vg-no-drag"
-          >
-            {conv.outputMuted ? (
-              <VolumeOffIcon className="h-4 w-4 text-red-400" />
-            ) : (
-              <VolumeOnIcon className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Definições"
-            onClick={onOpenSettings}
-            data-testid="open-settings"
-            className="vg-no-drag"
-          >
-            <SettingsIcon className="h-4 w-4" />
-          </Button>
+        {/* Row 1 — pure spacer that overlays the traffic lights. No
+            content here; the height matches Apple's HIG (28 px). */}
+        <div className="h-7" aria-hidden="true" />
+        {/* Row 2 — logo on the left, our controls aligned right. Same
+            visual weight as before, no padding contortions needed. */}
+        <div className="flex items-center justify-between gap-2 px-4 pb-2">
+          <Logo size={28} wordmark />
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={conv.outputMuted ? 'Voz mutada — clica para activar' : 'Mutar voz da Hermes'}
+              title={conv.outputMuted ? 'Voz mutada' : 'Mutar voz'}
+              onClick={() => conv.setOutputMuted(!conv.outputMuted)}
+              data-testid="mute-toggle"
+              data-muted={conv.outputMuted ? 'true' : 'false'}
+              className="vg-no-drag"
+            >
+              {conv.outputMuted ? (
+                <VolumeOffIcon className="h-4 w-4 text-red-400" />
+              ) : (
+                <VolumeOnIcon className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Definições"
+              onClick={onOpenSettings}
+              data-testid="open-settings"
+              className="vg-no-drag"
+            >
+              <SettingsIcon className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </header>
       <ConnectionIndicator
