@@ -36,6 +36,24 @@ import { fileURLToPath } from 'node:url';
  * `VG_E2E_TMPDIR=/Volumes/<roomy-disk>/.vg-e2e` keeps the system
  * filesystem clean while the suite runs.
  */
+/**
+ * Compute the Chromium flags that hide the Electron window. Enabled when
+ * `VG_E2E_HEADLESS=1` is set — used by CI (GitHub Actions, etc.) so the
+ * test run doesn't pop a visible window on every spec. Locally we leave
+ * it off so developers can watch the FSM transitions live while iterating.
+ *
+ * The `--headless=new` flag is Chromium's current opt-in for the modern
+ * headless mode; `--disable-gpu` keeps software rendering reliable on
+ * GitHub Actions runners that don't have a GPU. We also disable the
+ * sandbox (Electron + headless + sandbox is buggy on Linux CI) and pass
+ * `--no-sandbox` only when explicitly headless to avoid weakening local
+ * security.
+ */
+export function headlessArgs(): readonly string[] {
+  if (process.env['VG_E2E_HEADLESS'] !== '1') return [];
+  return ['--headless=new', '--disable-gpu', '--no-sandbox'];
+}
+
 export function vgTmpdir(): string {
   const override = process.env['VG_E2E_TMPDIR'];
   if (override && override.trim().length > 0) {
@@ -158,6 +176,7 @@ export async function launchUnpaired(
   const args: string[] = [
     `--user-data-dir=${userData}`,
     '--autoplay-policy=no-user-gesture-required',
+    ...headlessArgs(),
   ];
   if (opts.fakeAudioFile) {
     args.push('--use-fake-device-for-media-stream');
@@ -217,6 +236,7 @@ export async function launchPackaged(opts: LaunchOptions): Promise<TestRig> {
     // Chromium autoplay heuristic suspends new AudioContexts. Tests need to
     // get audio out, so opt out of the policy.
     '--autoplay-policy=no-user-gesture-required',
+    ...headlessArgs(),
   ];
   if (opts.fakeAudioFile) {
     args.push('--use-fake-device-for-media-stream');
