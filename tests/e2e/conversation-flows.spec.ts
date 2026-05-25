@@ -27,6 +27,7 @@ import {
   holdPtt,
   instrumentTtsCounter,
   launchPackaged,
+  openSettingsWindow,
   packagedAppExists,
   readVgStats,
   waitForState,
@@ -297,7 +298,7 @@ test.describe('conversation flows — packaged app', () => {
       bridgeUrl: bridge.url,
       bridgeToken: MOCK_DEFAULT_TOKEN,
     });
-    const { mainWindow, app } = rig;
+    const { mainWindow } = rig;
 
     // Install a listener on the MAIN window that records every
     // settings.onChange payload's minAudioMs.
@@ -313,15 +314,11 @@ test.describe('conversation flows — packaged app', () => {
       w.vg.settings.onChange((s) => w.__vg_settings_log!.push(s.activation.minAudioMs));
     });
 
-    // Open the dedicated Settings window and change minAudioMs via the IPC
-    // the panel uses (no need to drive the slider).
-    const open = app.waitForEvent('window', { timeout: 5_000 });
-    await mainWindow.evaluate(() => {
-      const w = globalThis as unknown as { vg: { settings: { openWindow: () => void } } };
-      w.vg.settings.openWindow();
-    });
-    const settingsWin = await open;
-    await settingsWin.waitForLoadState('domcontentloaded');
+    // Open the dedicated Settings window via the shared helper so the
+    // ciTimeout-aware 30 s ceiling protects us under macos-latest CPU
+    // pressure (issue #18) — the inline 5 s timeout this used to have
+    // was empirically too tight on CI cold-boot.
+    const settingsWin = await openSettingsWindow(rig);
 
     await settingsWin.evaluate(async () => {
       const w = globalThis as unknown as {

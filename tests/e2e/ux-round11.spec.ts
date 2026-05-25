@@ -26,6 +26,7 @@ import { scriptedTextReply } from './helpers/mock-bridge-presets';
 import { ConversationDriver } from './helpers/driver';
 import {
   FIXTURES_DIR,
+  ciTimeout,
   launchPackaged,
   openSettingsWindow,
   packagedAppExists,
@@ -256,10 +257,12 @@ test.describe('UX round-11 — capture timer, retry button, pre-flight, export, 
       executablePath: (await import('./helpers/rig')).PACKAGED_EXEC,
       args: [`--user-data-dir=${userData}`, '--autoplay-policy=no-user-gesture-required'],
       env: { ...process.env, VG_E2E: '1' },
-      timeout: 30_000,
+      // ciTimeout-aware: CI cold-boot was hitting the 30 s ceiling
+      // intermittently (issue #18). Local stays snappy.
+      timeout: ciTimeout(30_000, 60_000),
     });
     try {
-      const win = await next.firstWindow({ timeout: 15_000 });
+      const win = await next.firstWindow({ timeout: ciTimeout(15_000, 45_000) });
       await win.waitForLoadState('domcontentloaded');
       await expect(win.getByTestId('transcript-count')).toContainText(/2 mensagens/, {
         timeout: 10_000,
