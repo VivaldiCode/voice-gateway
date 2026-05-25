@@ -80,17 +80,26 @@ export function TutorialOverlay({ onComplete, hotkey }: TutorialOverlayProps): J
   const isLast = index === STEPS.length - 1;
 
   // Allow Escape to skip the tutorial — matches the rest of the app's
-  // "Escape dismisses overlays" convention (CommandHint, error toast, etc).
+  // "Escape dismisses overlays" convention (CommandHint, error toast,
+  // etc). Critical: call stopPropagation so MainScreen's own Escape
+  // handler (which would cancel an in-flight turn) doesn't ALSO fire.
+  // Reviewer-spotted nit, PR #11 round-12 — protects users who reopen
+  // the tutorial via Settings while a turn is mid-CAPTURING.
   useEffect(() => {
     const w = globalThis as unknown as {
-      addEventListener: (e: string, cb: (ev: { key: string }) => void) => void;
-      removeEventListener: (e: string, cb: (ev: unknown) => void) => void;
+      addEventListener: (e: string, cb: (ev: { key: string; stopPropagation?: () => void }) => void, capture?: boolean) => void;
+      removeEventListener: (e: string, cb: (ev: unknown) => void, capture?: boolean) => void;
     };
-    const handler = (ev: { key: string }): void => {
-      if (ev.key === 'Escape') onComplete();
+    const handler = (ev: { key: string; stopPropagation?: () => void }): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation?.();
+        onComplete();
+      }
     };
-    w.addEventListener('keydown', handler as (e: unknown) => void);
-    return () => w.removeEventListener('keydown', handler as (e: unknown) => void);
+    // Capture phase so we run BEFORE MainScreen's listener (also on
+    // window) sees the event.
+    w.addEventListener('keydown', handler as (e: unknown) => void, true);
+    return () => w.removeEventListener('keydown', handler as (e: unknown) => void, true);
   }, [onComplete]);
 
   return (
