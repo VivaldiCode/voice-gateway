@@ -1,6 +1,7 @@
 """Integration tests for the hermes-voice-bridge WS server."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator, List
 
@@ -375,3 +376,181 @@ def test_config_parses_optional_api_key() -> None:
 
     cfg2 = BridgeConfig.from_dict({"bridge": {"token": "x"}})
     assert cfg2.hermes_api_key == ""
+
+
+# ---------- round-12 B1: silent-task-crash + upstream-hang regression tests ----------
+
+
+class _CrashingAdapter(HermesAdapter):
+    """Pretends to be the Hermes adapter, but ``stream_chat`` blows up *before*
+    yielding anything. Without the round-12 done-callback the asyncio task
+    would die silently and the client would stay stuck in "thinking" forever
+    — which is exactly the bug the user reported."""
+
+    def __init__(self) -> None:
+        super().__init__("http://unused", 5)
+
+    async def stream_chat(self, *, text: str, session_id=None) -> AsyncIterator[str]:
+        raise RuntimeError("simulated upstream crash before any delta")
+        yield  # pragma: no cover - needed to mark this as an async generator
+
+
+async def test_run_turn_crash_surfaces_error_frame(aiohttp_client) -> None:
+    """B1 regression: when the run-turn task crashes BEFORE the inner
+    try/except — for example because the adapter blows up on `stream_chat`
+    construction — the client must still receive an error frame instead
+    of being stuck in 'thinking'. The done-callback on the task is what
+    makes this work."""
+    app = build_app(_config(), adapter=_CrashingAdapter())
+    client = await aiohttp_client(app)
+    ws = await client.ws_connect("/ws", headers={"Authorization": f"Bearer {TOKEN}"})
+    await ws.send_json({"type": "hello", "client_version": "0.1.0", "capabilities": []})
+    await ws.receive_json(timeout=2)  # welcome
+    await ws.send_json(
+        {"type": "transcript", "turn_id": "crash-1", "text": "olá", "final": True}
+    )
+    # We expect: thinking, then either:
+    #   - response_text + response_end (happy path, no crash) — NOT this case
+    #   - error frame with UNKNOWN code referencing RuntimeError
+    saw_thinking = False
+    saw_error = False
+    for _ in range(5):
+        msg = await ws.receive_json(timeout=2)
+        if msg["type"] == "thinking":
+            saw_thinking = True
+        elif msg["type"] == "error":
+            saw_error = True
+            assert "RuntimeError" in msg["message"] or "simulated" in msg["message"]
+            break
+    assert saw_thinking, "client must always see the thinking frame first"
+    assert saw_error, "client must see an error frame when the run-turn task crashes"
+    await ws.close()
+
+
+class _HangingAdapter(HermesAdapter):
+    """The adapter starts streaming but ``yield`` never actually fires —
+    the inner generator is parked on an unfulfilled future. The wall-clock
+    timeout in `_run_turn` is what saves the client from a forever-hang."""
+
+    def __init__(self, *, max_seconds: float = 5.0) -> None:
+        super().__init__("http://unused", 5)
+        self._max_seconds = max_seconds
+
+    async def stream_chat(self, *, text: str, session_id=None) -> AsyncIterator[str]:
+        # Yield zero deltas, then sit forever waiting on a future the test
+        # never resolves. asyncio.wait_for in _run_turn must cancel us.
+        await asyncio.sleep(self._max_seconds)
+        yield "unreachable"
+
+
+async def test_run_turn_wall_clock_timeout_sends_error_frame(
+    aiohttp_client, monkeypatch
+) -> None:
+    """B1 regression: if the Hermes upstream accepts the connection but
+    never streams anything (no data, no close), the bridge must eventually
+    give up and tell the client. Without the wall-clock timeout the user
+    sees 'A pensar' forever."""
+    # Tighten the wall-clock so the test runs in a couple of seconds.
+    import hermes_voice_bridge.server as server_mod
+    monkeypatch.setattr(server_mod, "RUN_TURN_WALL_CLOCK_SECONDS", 1)
+
+    app = build_app(_config(), adapter=_HangingAdapter(max_seconds=10.0))
+    client = await aiohttp_client(app)
+    ws = await client.ws_connect("/ws", headers={"Authorization": f"Bearer {TOKEN}"})
+    await ws.send_json({"type": "hello", "client_version": "0.1.0", "capabilities": []})
+    await ws.receive_json(timeout=2)  # welcome
+    await ws.send_json(
+        {"type": "transcript", "turn_id": "hang-1", "text": "olá", "final": True}
+    )
+    # We expect thinking first, then an error frame (HERMES_UPSTREAM, with
+    # the timeout message) within ~2 seconds (wall clock = 1s + grace).
+    saw_thinking = False
+    saw_error = False
+    for _ in range(6):
+        msg = await ws.receive_json(timeout=3)
+        if msg["type"] == "thinking":
+            saw_thinking = True
+        elif msg["type"] == "error":
+            saw_error = True
+            assert msg["code"] == "HERMES_UPSTREAM"
+            assert "1s" in msg["message"] or "pendurado" in msg["message"].lower() or "upstream" in msg["message"].lower()
+            break
+    assert saw_thinking
+    assert saw_error, "client must receive a HERMES_UPSTREAM error after the wall-clock timeout"
+    await ws.close()
+
+
+async def test_transcript_handler_logs_session_and_turn(aiohttp_client, caplog) -> None:
+    """The bridge must log enough context to debug 'silent stuck turn'
+    reports: at minimum the session id, the turn id, and a `run_turn end`
+    line so we can grep journalctl for the lifecycle."""
+    import logging
+    caplog.set_level(logging.INFO, logger="hermes_voice_bridge.server")
+    app = build_app(_config(), adapter=_StaticAdapter(["ok"]))
+    client = await aiohttp_client(app)
+    ws = await client.ws_connect("/ws", headers={"Authorization": f"Bearer {TOKEN}"})
+    await ws.send_json({"type": "hello", "client_version": "0.1.0", "capabilities": []})
+    await ws.receive_json(timeout=2)
+    await ws.send_json(
+        {"type": "transcript", "turn_id": "log-1", "text": "olá", "final": True}
+    )
+    # Drain frames until response_end.
+    for _ in range(8):
+        msg = await ws.receive_json(timeout=2)
+        if msg["type"] == "response_end":
+            break
+    await ws.close()
+    messages = [r.getMessage() for r in caplog.records]
+    # Required lifecycle markers:
+    assert any("received final transcript" in m for m in messages), messages
+    assert any("run_turn start" in m for m in messages), messages
+    assert any("run_turn end" in m for m in messages), messages
+    assert any("stream complete" in m for m in messages), messages
+
+
+async def test_run_turn_done_callback_catches_pre_try_crash(
+    aiohttp_client, monkeypatch
+) -> None:
+    """B1 round-12 reviewer nit: the previous crash test goes through the
+    inner try/except, which exists even without the done-callback. To
+    actually prove the done-callback adds value, force a failure on the
+    very first `ws.send_json` (the `thinking` frame) — that runs BEFORE
+    `_run_turn`'s try block, so the bare task would otherwise die silent.
+    Wrapping ws.send_json to raise on the first call provokes exactly
+    that pre-try crash."""
+    import hermes_voice_bridge.server as server_mod
+
+    app = build_app(_config(), adapter=_StaticAdapter(["unreachable"]))
+    client = await aiohttp_client(app)
+    ws = await client.ws_connect("/ws", headers={"Authorization": f"Bearer {TOKEN}"})
+    await ws.send_json({"type": "hello", "client_version": "0.1.0", "capabilities": []})
+    await ws.receive_json(timeout=2)  # welcome
+
+    # Patch _run_turn so the very first await — the thinking-frame send —
+    # raises BEFORE the try/except in _run_turn_inner can catch it.
+    original_run_turn = server_mod._run_turn
+
+    async def _exploding_run_turn(ws_arg, adapter, turn_id, text, session_id):
+        # This raise lives BEFORE original_run_turn's try/except wrapper.
+        raise RuntimeError("simulated pre-try crash on thinking frame")
+
+    monkeypatch.setattr(server_mod, "_run_turn", _exploding_run_turn)
+
+    await ws.send_json(
+        {"type": "transcript", "turn_id": "precrash-1", "text": "olá", "final": True}
+    )
+    saw_error = False
+    for _ in range(5):
+        msg = await ws.receive_json(timeout=2)
+        if msg["type"] == "error":
+            saw_error = True
+            assert "RuntimeError" in msg["message"] or "simulated" in msg["message"]
+            break
+    assert saw_error, (
+        "done-callback must dispatch an error frame when the run-turn "
+        "task crashes BEFORE the inner try/except"
+    )
+    await ws.close()
+    # Silence the unused-import linter while keeping the original imported
+    # version reachable for the rest of the suite.
+    assert original_run_turn is not None

@@ -102,8 +102,23 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 text = str(data.get("text", ""))
                 final = bool(data.get("final"))
                 if final and text.strip():
-                    asyncio.create_task(
+                    log.info(
+                        "received final transcript (session=%s turn=%s chars=%d)",
+                        session_id,
+                        turn_id,
+                        len(text),
+                    )
+                    task = asyncio.create_task(
                         _run_turn(ws, adapter, turn_id, text, session_id)
+                    )
+                    # Attach a done-callback so an uncaught exception in
+                    # _run_turn surfaces in logs AND the client gets an
+                    # error frame instead of being silently stuck in
+                    # "thinking" forever (round-12 B1: this was the
+                    # documented failure mode — client hangs because the
+                    # task crashed before the try/except inside _run_turn).
+                    task.add_done_callback(
+                        lambda t, w=ws, tid=turn_id: _log_task_outcome(t, w, tid)
                     )
                 continue
             if t in {"start_turn", "end_turn", "audio_chunk", "interrupt"}:
@@ -122,6 +137,13 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+# Wall-clock cap for one full turn. Hermes streaming should normally take
+# only a few seconds; anything past this is almost certainly a stuck
+# upstream (open socket, no data) and we'd rather the user see a clear
+# error than stare at "A pensar" indefinitely.
+RUN_TURN_WALL_CLOCK_SECONDS = 120
+
+
 async def _run_turn(
     ws: web.WebSocketResponse,
     adapter: HermesAdapter,
@@ -131,35 +153,28 @@ async def _run_turn(
 ) -> None:
     if ws.closed:
         return
+    log.info("run_turn start (session=%s turn=%s)", session_id, turn_id)
     await ws.send_json({"type": "thinking", "turn_id": turn_id})
     try:
-        buffered = ""
-        async for delta in adapter.stream_chat(text=text, session_id=session_id):
-            if ws.closed:
-                return
-            buffered += delta
-            await ws.send_json(
-                {"type": "response_text", "turn_id": turn_id, "text": delta, "final": False}
-            )
-        if ws.closed:
-            return
-        if not buffered.strip():
-            # Hermes accepted the request but produced no content. Surface
-            # an error so the desktop user sees something actionable instead
-            # of a silently-empty assistant bubble.
+        await asyncio.wait_for(
+            _run_turn_inner(ws, adapter, turn_id, text, session_id),
+            timeout=RUN_TURN_WALL_CLOCK_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        log.warning(
+            "run_turn wall-clock timeout (%ds) session=%s turn=%s",
+            RUN_TURN_WALL_CLOCK_SECONDS,
+            session_id,
+            turn_id,
+        )
+        if not ws.closed:
             await send_error(
                 ws,
                 "HERMES_UPSTREAM",
-                "Hermes respondeu mas sem texto. Verifica os logs do agent"
-                " (journalctl -u hermes-agent ou equivalente) — o modelo pode"
-                " não estar carregado.",
+                f"Hermes não respondeu em {RUN_TURN_WALL_CLOCK_SECONDS}s."
+                " O upstream pode estar pendurado — verifica os logs do agent.",
                 turn_id=turn_id,
             )
-            return
-        await ws.send_json(
-            {"type": "response_text", "turn_id": turn_id, "text": buffered, "final": True}
-        )
-        await ws.send_json({"type": "response_end", "turn_id": turn_id})
     except HermesUpstreamError as err:
         log.warning("hermes upstream error: %s", err)
         if not ws.closed:
@@ -173,6 +188,98 @@ async def _run_turn(
             tail = str(err).strip()
             detail = f"{type(err).__name__}: {tail}" if tail else type(err).__name__
             await send_error(ws, "UNKNOWN", detail, turn_id=turn_id)
+    finally:
+        log.info("run_turn end (session=%s turn=%s)", session_id, turn_id)
+
+
+async def _run_turn_inner(
+    ws: web.WebSocketResponse,
+    adapter: HermesAdapter,
+    turn_id: str,
+    text: str,
+    session_id: str,
+) -> None:
+    """The actual streaming loop, factored out so the wall-clock timeout
+    in _run_turn can wrap it cleanly."""
+    buffered = ""
+    delta_count = 0
+    async for delta in adapter.stream_chat(text=text, session_id=session_id):
+        if ws.closed:
+            return
+        buffered += delta
+        delta_count += 1
+        await ws.send_json(
+            {"type": "response_text", "turn_id": turn_id, "text": delta, "final": False}
+        )
+    if ws.closed:
+        return
+    log.info(
+        "stream complete (turn=%s deltas=%d chars=%d)",
+        turn_id,
+        delta_count,
+        len(buffered),
+    )
+    if not buffered.strip():
+        # Hermes accepted the request but produced no content. Surface
+        # an error so the desktop user sees something actionable instead
+        # of a silently-empty assistant bubble.
+        await send_error(
+            ws,
+            "HERMES_UPSTREAM",
+            "Hermes respondeu mas sem texto. Verifica os logs do agent"
+            " (journalctl -u hermes-agent ou equivalente) — o modelo pode"
+            " não estar carregado.",
+            turn_id=turn_id,
+        )
+        return
+    await ws.send_json(
+        {"type": "response_text", "turn_id": turn_id, "text": buffered, "final": True}
+    )
+    await ws.send_json({"type": "response_end", "turn_id": turn_id})
+
+
+def _log_task_outcome(
+    task: "asyncio.Task[None]",
+    ws: web.WebSocketResponse,
+    turn_id: str,
+) -> None:
+    """Done-callback for the _run_turn task. Bare ``asyncio.create_task``
+    would swallow exceptions raised before the inner try/except (e.g. an
+    `await ws.send_json` failure on the initial ``thinking`` frame), and
+    the client would stay stuck in "A pensar" forever. This callback both
+    logs the crash and best-effort dispatches an error frame so the UI
+    can recover."""
+    if task.cancelled():
+        log.warning("_run_turn task cancelled (turn=%s)", turn_id)
+        return
+    err = task.exception()
+    if err is None:
+        return
+    log.exception("_run_turn crashed (turn=%s): %r", turn_id, err, exc_info=err)
+    if ws.closed:
+        return
+    detail = f"{type(err).__name__}: {err}" if str(err).strip() else type(err).__name__
+    # The error-frame dispatch is itself a coroutine; wrap it with its own
+    # done-callback so a secondary failure (WS closed mid-write, etc.)
+    # doesn't recreate the exact "task crashes silently" pattern this
+    # function exists to prevent. Reviewer-suggested nit, PR #1 round-12.
+    recovery = asyncio.create_task(send_error(ws, "UNKNOWN", detail, turn_id=turn_id))
+    recovery.add_done_callback(lambda r, tid=turn_id: _log_recovery_outcome(r, tid))
+
+
+def _log_recovery_outcome(task: "asyncio.Task[None]", turn_id: str) -> None:
+    """Inner safety net for the error-frame dispatch fired from
+    _log_task_outcome. Just logs — there's no further fallback to try
+    once the WS itself rejected our error frame."""
+    if task.cancelled():
+        return
+    err = task.exception()
+    if err is not None:
+        log.warning(
+            "recovery error frame failed (turn=%s): %r — nothing more we can do",
+            turn_id,
+            err,
+        )
 
 
 async def send_error(
