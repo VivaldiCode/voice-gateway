@@ -50,7 +50,28 @@ function resolvePythonBin(): string | null {
   return null;
 }
 
+/**
+ * Confirm the helper script can actually boot before we let the suite
+ * run. A Python binary on PATH is not enough — the helper also needs
+ * `aiohttp` and the `hermes_voice_bridge` package importable. On CI
+ * the vitest job has python3 but does NOT install the bridge's Python
+ * deps (only the dedicated pytest job does), so without this probe
+ * the helper exits with code 1 and the spec reports four spurious
+ * failures. (Same gate as PRs #17 and #23.)
+ */
+function bridgeImportsCleanly(bin: string): boolean {
+  const serverSrc = join(HERE, '..', '..', 'server', 'hermes-voice-bridge', 'src');
+  const probe = `import sys; sys.path.insert(0, ${JSON.stringify(serverSrc)}); import aiohttp; from hermes_voice_bridge.config import BridgeConfig`;
+  try {
+    const r = spawnSync(bin, ['-c', probe], { stdio: 'ignore' });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 const PYTHON_BIN = resolvePythonBin();
+const BRIDGE_READY = PYTHON_BIN !== null && bridgeImportsCleanly(PYTHON_BIN);
 
 interface BootedBridge {
   url: string;
@@ -129,7 +150,11 @@ async function bootBridge(mode: string): Promise<BootedBridge> {
   });
 }
 
-const SKIP = PYTHON_BIN === null;
+// Skip when Python is missing entirely OR when the bridge's Python
+// deps aren't installed (CI's vitest job has python3 but no aiohttp
+// or hermes_voice_bridge). The dedicated pytest job covers the bridge
+// in isolation; this integration spec is opportunistic.
+const SKIP = !BRIDGE_READY;
 
 describe.skipIf(SKIP)('connector → bridge integration (issue #14)', () => {
   // The helper imports from `server/hermes-voice-bridge/src/` via a
