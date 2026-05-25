@@ -17,6 +17,7 @@ import { scriptedError } from './helpers/mock-bridge-presets';
 import { ConversationDriver } from './helpers/driver';
 import {
   FIXTURES_DIR,
+  ciTimeout,
   launchPackaged,
   launchUnpaired,
   packagedAppExists,
@@ -85,7 +86,10 @@ test.describe('UX shortcuts + chrome', () => {
       timeout: 15_000,
     });
 
-    const open = app.waitForEvent('window', { timeout: 5_000 });
+    // ciTimeout-aware: the 5 s ceiling was too tight on macos-latest CPU
+    // pressure (issue #18). The keyboard path can't use openSettingsWindow
+    // because it has to dispatch the actual Cmd+, event.
+    const open = app.waitForEvent('window', { timeout: ciTimeout(5_000, 30_000) });
     // Page focus is implicit when we evaluate inside the page context.
     await mainWindow.locator('body').click();
     await mainWindow.keyboard.press('Meta+,');
