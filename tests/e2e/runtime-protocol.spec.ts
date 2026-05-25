@@ -62,6 +62,13 @@ test.describe('runtime protocol', () => {
 
   // ───── #63: bridge sends explicit error frame
   test('bridge error frame surfaces in the error toast + FSM goes ERROR', async () => {
+    // Issue #30 (user-approved Option B): bridge-error → ERROR transition
+    // is dropped on headless macOS CI. Spec passes on dev macOS in
+    // non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     const errMsg = `Hermes respondeu sem texto — verifica o agent #${Date.now()}`;
     bridge = await startMockBridge({
       onClientMessage: scriptedError({
@@ -91,6 +98,14 @@ test.describe('runtime protocol', () => {
 
   // ───── #65: backpressure — many rapid server-audio chunks
   test('50 server-side audio chunks all reach the renderer', async () => {
+    // Issue #30 (user-approved Option B): same audio-chunk IPC race as
+    // the other tts_chunk specs — on headless macOS CI the chunk
+    // counter occasionally reads 0 even though the bridge has clearly
+    // pushed the frames. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     const CHUNK_COUNT = 50;
     bridge = await startMockBridge({
       onClientMessage: (raw, _send) => {
@@ -262,6 +277,15 @@ test.describe('wake-event safety from non-rest states', () => {
   });
 
   test('wakeDetected() during CAPTURING is a no-op — state stays CAPTURING with the same turnId', async () => {
+    // Issue #30 (user-approved Option B): wake-event-during-CAPTURING
+    // assertion races the orchestrator's state pipeline on headless
+    // macOS — the FSM observably enters CAPTURING but the spec's
+    // post-wake-event assertion sees a stale state. Spec passes on dev
+    // macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     // Bridge does nothing — we only care about the FSM's reaction to the
     // wake event firing while the FSM is already in CAPTURING (i.e. mid-
     // utterance). This is the closest to the real "openwakeword fires

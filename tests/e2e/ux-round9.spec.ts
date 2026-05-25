@@ -23,6 +23,7 @@ import {
   FIXTURES_DIR,
   launchPackaged,
   packagedAppExists,
+  readLastClipboard,
   type TestRig,
 } from './helpers/rig';
 import { join } from 'node:path';
@@ -48,6 +49,14 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
 
   // ───── #103 + #100: turn counter shows, Cmd+L wipes the transcript
   test('Cmd+L clears the transcript locally and the counter goes back to 0', async () => {
+    // Issue #30 (user-approved Option B): asserts the transcript has 2
+    // turns before Cmd+L wipes it; the FSM doesn't reach a state where
+    // the rows render on headless macOS CI. Spec passes on dev macOS
+    // in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('ok'),
     });
@@ -68,7 +77,14 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
     await driver.runTurn({ holdMs: 200, until: ['IDLE'] });
 
     // The counter chip should now read "2 mensagens" (user + assistant).
-    await expect(mainWindow.getByTestId('transcript-count')).toContainText(/2 mensagens/);
+    // Bumped to 10 s for CI: when the FSM reaches IDLE the renderer's
+    // React state for transcript can lag a tick behind (the auto-
+    // instrument array path is intact, but onResponseText delivery to
+    // React's setState batched into the next render is what the chrome
+    // observes — see waitForState's "renderer DOM as fallback" doc).
+    await expect(mainWindow.getByTestId('transcript-count')).toContainText(/2 mensagens/, {
+      timeout: 10_000,
+    });
 
     // Cmd+L wipes the local transcript.
     await mainWindow.keyboard.press('Meta+l');
@@ -83,6 +99,14 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
 
   // ───── #102: copy conversa serialises to the clipboard
   test('"copiar" button on the transcript copies a formatted dump', async () => {
+    // Issue #30 (user-approved Option B): the copy button doesn't render
+    // until a turn completes, but the FSM's response_text → IDLE transition
+    // gets dropped on headless macOS CI, so the button locator never
+    // becomes visible. Spec passes on dev macOS in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('tudo bem'),
     });
@@ -97,37 +121,23 @@ test.describe('UX round-9 — main window keyboard + transcript chrome', () => {
     await expect(mainWindow.getByTestId('connection-indicator')).toContainText(/ligado|ms/i, {
       timeout: 15_000,
     });
-    // Permit clipboard writes for the test origin (file://) — Playwright
-    // doesn't auto-grant clipboard-write inside an Electron context.
-    await mainWindow.evaluate(() => {
-      // The tests config doesn't include DOM lib types — `navigator` is
-      // only available at runtime inside the page context. Cast through
-      // unknown so the type checker is happy while the runtime stays the
-      // same in-page navigator.
-      const g = globalThis as unknown as {
-        __vg_last_clip: string | null;
-        navigator: { clipboard: { writeText: (s: string) => Promise<void> } };
-      };
-      g.__vg_last_clip = null;
-      const orig = g.navigator.clipboard.writeText.bind(g.navigator.clipboard);
-      g.navigator.clipboard.writeText = async (s: string) => {
-        g.__vg_last_clip = s;
-        try {
-          await orig(s);
-        } catch {
-          // permissions in headless can fail; we still recorded the value
-        }
-      };
-    });
+    // grantClipboardWrite was already called by launchPackaged — every
+    // navigator.clipboard.writeText now records into window.__vg_last_clip
+    // and swallows the headless-Chromium permission error.
 
     const driver = await ConversationDriver.attach(mainWindow);
     await driver.runTurn({ holdMs: 200, until: ['IDLE'] });
 
+    // The transcript-copy button may not be in the DOM until both
+    // transcript lines (user + assistant) have rendered. Wait for the
+    // line count to settle so the click target exists. The race here is
+    // the same auto-instrument timing window described in waitForState:
+    // by IDLE the FSM-emitted events have flowed, but React render +
+    // child mount can lag a tick or two.
+    await expect(mainWindow.getByTestId('transcript-copy')).toBeVisible({ timeout: 5_000 });
     await mainWindow.getByTestId('transcript-copy').click();
 
-    const copied = await mainWindow.evaluate(
-      () => (globalThis as unknown as { __vg_last_clip: string | null }).__vg_last_clip,
-    );
+    const copied = await readLastClipboard(mainWindow);
     expect(copied, 'clipboard text').not.toBeNull();
     expect(copied).toMatch(/Tu:.*olá/);
     expect(copied).toMatch(/Hermes:.*tudo bem/);
