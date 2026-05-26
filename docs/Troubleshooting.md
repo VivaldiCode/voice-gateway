@@ -237,6 +237,50 @@ down. Same triage as the pairing failure above.
 
 See [[WebSocket-Client#reconnect-backoff]] for the full ladder.
 
+## Build fails fast with MODULE_NOT_FOUND inside node_modules
+
+Symptom: `npm run build:mac` aborts after `electron-vite build` finishes
+with something like:
+
+```
+Error: Cannot find module '/.../node_modules/builder-util/node_modules/fs-extra/lib/index.js'.
+Please verify that the package.json has a valid "main" entry
+  code: 'MODULE_NOT_FOUND',
+  requestPath: 'fs-extra'
+```
+
+The `package.json` referenced in the error is usually present — only
+one or two files inside the package have vanished. The root cause is
+typically the repo living on an external volume whose filesystem
+(exFAT, MS-DOS) doesn't preserve POSIX metadata reliably; individual
+nested files drop out without the surrounding tree being broken. APFS
+volumes don't exhibit this.
+
+### What to do
+
+The `tools/build-doctor.cjs` pre-flight (wired into `build:mac`,
+`build:linux`, `build:win`) detects the most commonly affected paths
+and prints the exact recovery command — usually:
+
+```bash
+rm -rf node_modules/<pkg>/node_modules/<dep>
+npm install
+```
+
+…which takes ~10 s and avoids the alternative (`rm -rf node_modules &&
+npm ci`) that can need >10 min and several GB of free disk.
+
+### If the doctor passes but the build still fails this way
+
+You hit a path the doctor doesn't know about yet. Two steps:
+
+1. Read the failing path out of the error message.
+2. Add it to `CRITICAL_FILES` in
+   [`tools/build-doctor.cjs`](https://github.com/VivaldiCode/voice-gateway/blob/main/tools/build-doctor.cjs)
+   in the same PR that documents the new failure mode.
+
+See [[Build-And-Packaging#build-doctor-pre-flight]] for the rationale.
+
 ## Filing bugs
 
 Logs live at:
