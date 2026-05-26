@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { cn } from '../lib/cn';
+import { useT } from '../i18n';
 
 export interface TranscriptLine {
   id: string;
@@ -37,22 +38,19 @@ export function TranscriptView({
   onClear,
   onCopy,
 }: TranscriptViewProps): JSX.Element {
+  const t = useT();
   const scroller = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, [lines]);
   const emptyHint =
-    activationMode === 'WAKE_WORD'
-      ? 'Diz a palavra-chave ou usa o atalho para começar.'
-      : 'Carrega no botão ou usa o atalho para começar.';
+    activationMode === 'WAKE_WORD' ? t.transcript.emptyWake : t.transcript.emptyPtt;
   const visibleCount = totalTurns ?? lines.length;
   return (
     <div className="flex w-full max-w-md flex-col gap-1">
       {visibleCount > 0 && (
         <div className="flex items-center justify-between gap-2 px-1 text-[10px] text-zinc-500">
-          <span data-testid="transcript-count">
-            {visibleCount} {visibleCount === 1 ? 'mensagem' : 'mensagens'}
-          </span>
+          <span data-testid="transcript-count">{t.transcript.nMessages(visibleCount)}</span>
           <div className="flex items-center gap-2">
             {onCopy && (
               <button
@@ -60,9 +58,9 @@ export function TranscriptView({
                 className="rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider text-zinc-500 hover:bg-bg-subtle hover:text-zinc-200"
                 onClick={onCopy}
                 data-testid="transcript-copy"
-                aria-label="Copiar conversa"
+                aria-label={t.transcript.copyAria}
               >
-                copiar
+                {t.transcript.copy}
               </button>
             )}
             {onClear && (
@@ -71,9 +69,9 @@ export function TranscriptView({
                 className="rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider text-zinc-500 hover:bg-bg-subtle hover:text-zinc-200"
                 onClick={onClear}
                 data-testid="transcript-clear"
-                aria-label="Limpar conversa"
+                aria-label={t.transcript.clearAria}
               >
-                limpar
+                {t.transcript.clear}
               </button>
             )}
           </div>
@@ -99,7 +97,7 @@ export function TranscriptView({
               data-testid={`transcript-${l.role}`}
             >
               <span className="mr-2 text-[10px] uppercase tracking-wider text-zinc-500">
-                {l.role === 'user' ? 'tu' : 'hermes'}
+                {l.role === 'user' ? t.transcript.userPrefix : t.transcript.assistantPrefix}
               </span>
               {l.text}
             </p>

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from './Button';
+import { useT } from '../i18n';
 
 /**
  * Post-pair interactive tutorial (round-12 I5).
@@ -36,46 +37,23 @@ interface Step {
   hint?: string;
 }
 
-const STEPS: readonly Step[] = [
-  {
-    title: 'Bem-vindo ao Voice Gateway 👋',
-    body:
-      'Em três ecrãs ensino-te o básico. Demora menos de 30 segundos e podes' +
-      ' saltar quando quiseres.',
-  },
-  {
-    title: 'Carrega no botão para falar',
-    body:
-      'O grande botão violeta no centro da janela é o teu microfone. Mantém' +
-      ' premido enquanto falas e larga quando acabares — o Hermes responde' +
-      ' em segundos.',
-    hint: 'Em alternativa, usa o atalho global (configurado no setup).',
-  },
-  {
-    title: 'O X cancela a meio',
-    body:
-      'Enquanto estás a falar, aparece um botão "×" pequenino ao lado do' +
-      ' microfone. Carrega aí (ou prime Escape) para cancelar o turno sem' +
-      ' enviar nada.',
-    hint: 'Útil quando começas a dizer a coisa errada.',
-  },
-  {
-    title: 'Tudo o resto vive em Definições',
-    body:
-      'Voz, microfone, palavra-chave, idioma, exportar conversa — tudo num' +
-      ' painel acessível pelo ⚙ no canto. Atalho ⌘, abre directamente.',
-    hint: 'Cmd+L limpa a conversa · Cmd+S exporta para ficheiro.',
-  },
-  {
-    title: 'Pronto! Diz olá ao Hermes.',
-    body:
-      'Se mudares de ideias, podes voltar a abrir este tutorial em' +
-      ' Definições → Avançado.',
-  },
-];
-
 export function TutorialOverlay({ onComplete, hotkey }: TutorialOverlayProps): JSX.Element {
+  const t = useT();
   const [index, setIndex] = useState(0);
+  // Read the active locale's dictionary once per render and assemble
+  // the step list. Memoising on `t` keeps the array reference stable
+  // across re-renders that don't flip the locale (so child renders
+  // stay quiet) and rebuilds it on a live locale swap.
+  const STEPS = useMemo<readonly Step[]>(
+    () => [
+      { title: t.tutorial.welcomeTitle, body: t.tutorial.welcomeBody },
+      { title: t.tutorial.pressTitle, body: t.tutorial.pressBody, hint: t.tutorial.pressHint },
+      { title: t.tutorial.cancelTitle, body: t.tutorial.cancelBody, hint: t.tutorial.cancelHint },
+      { title: t.tutorial.settingsTitle, body: t.tutorial.settingsBody, hint: t.tutorial.settingsHint },
+      { title: t.tutorial.doneTitle, body: t.tutorial.doneBody },
+    ],
+    [t],
+  );
   const step = STEPS[index] ?? STEPS[0];
   const isLast = index === STEPS.length - 1;
 
@@ -150,7 +128,7 @@ export function TutorialOverlay({ onComplete, hotkey }: TutorialOverlayProps): J
             data-testid="tutorial-skip"
             className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
           >
-            Saltar tutorial
+            {t.tutorial.skip}
           </button>
           <div className="flex gap-2">
             {index > 0 && (
@@ -160,7 +138,7 @@ export function TutorialOverlay({ onComplete, hotkey }: TutorialOverlayProps): J
                 onClick={() => setIndex((i) => Math.max(0, i - 1))}
                 data-testid="tutorial-back"
               >
-                ← Anterior
+                {t.tutorial.back}
               </Button>
             )}
             <Button
@@ -169,7 +147,7 @@ export function TutorialOverlay({ onComplete, hotkey }: TutorialOverlayProps): J
               onClick={() => (isLast ? onComplete() : setIndex((i) => i + 1))}
               data-testid={isLast ? 'tutorial-done' : 'tutorial-next'}
             >
-              {isLast ? 'Começar' : 'Seguinte →'}
+              {isLast ? t.tutorial.start : t.tutorial.next}
             </Button>
           </div>
         </div>
