@@ -19,6 +19,19 @@ export interface Dictionary {
     /** Title of the desktop notification shown when an assistant reply
      *  lands while the window is unfocused/hidden. */
     notificationReply: string;
+    /** aria-label + tooltip on the mic-picker icon button (issue #20). */
+    micPickerAria: string;
+    /** Heading inside the mic-picker popover. */
+    micPickerTitle: string;
+    /** aria-label + tooltip on the speaker-picker icon button. */
+    speakerPickerAria: string;
+    /** Heading inside the speaker-picker popover. */
+    speakerPickerTitle: string;
+    /** Pseudo-entry label for "fall back to the OS default device". */
+    devicePickerDefault: string;
+    /** Hint shown when device labels are missing (mic permission not
+     *  granted yet — labels populate after permission). */
+    devicePickerNoLabels: string;
   };
   state: {
     IDLE: string;
@@ -121,6 +134,13 @@ export const pt: Dictionary = {
     windowTitle: (state) => `Voice Gateway — ${state}`,
     cancelCaptureAria: 'Cancelar gravação',
     notificationReply: 'Hermes respondeu',
+    micPickerAria: 'Escolher microfone',
+    micPickerTitle: 'Microfone',
+    speakerPickerAria: 'Escolher auscultadores',
+    speakerPickerTitle: 'Saída de áudio',
+    devicePickerDefault: 'Padrão do sistema',
+    devicePickerNoLabels:
+      'Concede permissão de microfone para ver os nomes dos dispositivos.',
   },
   state: {
     IDLE: 'Pronto',
