@@ -37,7 +37,7 @@ jobs:
       - name: Build packaged .app + DMG
         run: npm run build:mac
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Voice-Gateway-${{ github.ref_name }}-arm64.dmg
           path: release/*.dmg
