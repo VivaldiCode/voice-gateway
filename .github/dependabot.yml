@@ -1,0 +1,96 @@
+# Dependabot — issue #22.
+#
+# Catches vulnerable transitive dependencies + keeps the supply chain
+# fresh across our three ecosystems:
+#
+#   - npm        — top-level package.json + lockfile (renderer + main + preload)
+#   - pip        — server/hermes-voice-bridge/pyproject.toml
+#   - github-actions — every workflow in .github/workflows/, including
+#                      SHA-pinned actions so we get PRs to bump pins as
+#                      new minor/patch SHAs ship
+#
+# All ecosystems use weekly cadence — fast enough to surface CVEs within
+# 7 days, slow enough to not drown the maintainer in PRs. Security
+# updates always come through immediately regardless of schedule.
+#
+# Non-security minor + patch updates are grouped per ecosystem so we
+# get one consolidated PR per week instead of N separate ones. Major
+# version bumps come ungrouped so each gets the review attention they
+# need (likely breaking).
+
+version: 2
+updates:
+  # ── npm (top-level Electron app) ────────────────────────────────────
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'sunday'
+      time: '04:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    labels:
+      - 'dependencies'
+      - 'npm'
+    groups:
+      # All non-major updates roll up into one PR per week.
+      npm-non-major:
+        applies-to: version-updates
+        update-types:
+          - 'minor'
+          - 'patch'
+      # Security updates ALWAYS land regardless of group settings.
+      # They're a separate channel; this entry just labels them.
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - '*'
+    # Ignore Electron majors — we coordinate those manually because
+    # they ship behaviour changes (e.g. session API tweaks, autoUpdater
+    # cert rotation) that need code changes elsewhere.
+    ignore:
+      - dependency-name: 'electron'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'electron-builder'
+        update-types: ['version-update:semver-major']
+
+  # ── pip (hermes-voice-bridge) ───────────────────────────────────────
+  - package-ecosystem: 'pip'
+    directory: '/server/hermes-voice-bridge'
+    schedule:
+      interval: 'weekly'
+      day: 'sunday'
+      time: '04:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    labels:
+      - 'dependencies'
+      - 'python'
+    groups:
+      pip-non-major:
+        applies-to: version-updates
+        update-types:
+          - 'minor'
+          - 'patch'
+
+  # ── github-actions (workflow SHA pins) ──────────────────────────────
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'sunday'
+      time: '04:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    labels:
+      - 'dependencies'
+      - 'github-actions'
+    groups:
+      # Roll all action SHA bumps into one PR per week. Major bumps
+      # still come individually because they sometimes change input
+      # contracts (e.g. setup-node@v3 → v4 dropped Node 14).
+      gh-actions-non-major:
+        applies-to: version-updates
+        update-types:
+          - 'minor'
+          - 'patch'

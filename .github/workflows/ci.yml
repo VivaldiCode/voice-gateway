@@ -9,15 +9,19 @@
 #     tags or manual dispatch
 #
 # Jobs:
-#   1. lint-and-typecheck       — fast feedback: tsc + (future) lint
+#   1. lint-and-typecheck       — fast feedback: tsc + lint
 #   2. vitest                    — unit + integration on Node 20 and 22
 #   3. pytest                    — bridge tests (Linux only)
 #   4. e2e-packaged              — Playwright against the packaged macOS
 #                                  .app, headless (VG_E2E_HEADLESS=1)
+#   5. dependency-review         — issue #22: blocks PRs introducing
+#                                  vulnerable deps at high+ severity
 #
-# Coverage badges + uploads are intentionally out of scope for now;
-# coverage lives in `coverage/` after vitest --coverage and PR comments
-# can be wired up later.
+# Issue #22: every GitHub Action is pinned to its commit SHA (not a
+# floating tag) so a compromised tag re-point can't silently swap
+# behaviour during a CI run. Dependabot's `github-actions` ecosystem
+# (see .github/dependabot.yml) opens PRs weekly to bump these SHAs as
+# the upstream actions ship new patch/minor releases.
 
 name: CI
 
@@ -43,8 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -52,6 +56,8 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Lint
+        run: npm run lint
 
   vitest:
     name: Vitest (Node ${{ matrix.node }})
@@ -62,18 +68,29 @@ jobs:
       matrix:
         node: ['20', '22']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - name: Install
         run: npm ci
+      # Issue #22: surface known npm vulns + verify provenance.
+      # Both are ADVISORY for now (|| true): the current dependency tree
+      # has 17 known vulns (mostly transitive in electron-builder) that
+      # we need to triage before flipping these to gating. Hardening
+      # follow-up tracked once Dependabot has had a chance to bump the
+      # transitives. The advisory mode keeps the report visible in CI
+      # logs without blocking unrelated PRs.
+      - name: npm audit (advisory)
+        run: npm audit --audit-level=high || true
+      - name: npm audit signatures (advisory)
+        run: npm audit signatures || true
       - name: Run vitest with coverage
         run: npx vitest run --coverage
       - name: Upload coverage artifact
         if: matrix.node == '22'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-vitest
           path: coverage/
@@ -84,8 +101,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
           cache: pip
@@ -94,9 +111,52 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+      # Issue #22: pip-audit flags vulnerable Python deps.
+      # Advisory for now: the bridge itself isn't on PyPI so pip-audit
+      # in editable mode can't resolve it ("Dependency not found on
+      # PyPI"). We audit the resolved environment, ignore the local
+      # package, and let the report surface in logs without blocking.
+      # Hardening + a proper requirements.txt to audit against is a
+      # follow-up tracked alongside the npm-audit gating bump.
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: pip-audit (advisory)
+        working-directory: server/hermes-voice-bridge
+        run: pip-audit --ignore-vuln "hermes-voice-bridge" || true
       - name: Run pytest
         working-directory: server/hermes-voice-bridge
         run: pytest -q
+
+  # Issue #22: catches PRs that introduce new transitive deps with
+  # known high-severity vulns. Runs only on pull_request AND only when
+  # the repo opts in via the `VG_DEP_REVIEW_ENABLED` repo variable.
+  #
+  # The action requires the repository's "Dependency graph" setting
+  # to be enabled (Settings → Code security → Dependency graph). Until
+  # a maintainer flips that toggle, the action errors with "Dependency
+  # review is not supported on this repository" — which the rollup
+  # reports as FAILURE and trips the "all CI green" merge gate. Gating
+  # the job behind a repo variable lets us land the workflow definition
+  # now and turn it on later without churning the workflow file.
+  #
+  # To enable: GitHub repo → Settings → Secrets and variables → Actions
+  #            → Variables → New repository variable → name
+  #            `VG_DEP_REVIEW_ENABLED`, value `true`.
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request' && vars.VG_DEP_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          # Block PRs introducing CVSS ≥ 7.0 deps. Lower severities
+          # surface as comments without blocking.
+          fail-on-severity: high
+          # Don't allow new GPL / AGPL / SSPL deps without explicit
+          # review — they conflict with our distribution model.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
 
   e2e-packaged:
     name: Playwright E2E (packaged .app, headless)
@@ -106,8 +166,8 @@ jobs:
     # voice models) so we only run the fast, mock-bridge-only specs by
     # using grep -v.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -132,7 +192,7 @@ jobs:
             --grep-invert='audio-conversation|mic-capture|wake-word|settings-audio'
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report
           path: |
