@@ -38,9 +38,9 @@ jobs:
           # No build step today — this is the hook for future SSG migrations.
           test -f site/index.html
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
   deploy:
