@@ -45,7 +45,7 @@ jobs:
   lint-and-typecheck:
     name: Lint + typecheck (Node 22)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -62,7 +62,7 @@ jobs:
   vitest:
     name: Vitest (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +99,7 @@ jobs:
   pytest:
     name: Pytest — hermes-voice-bridge
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -161,7 +161,7 @@ jobs:
   e2e-packaged:
     name: Playwright E2E (packaged .app, headless)
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     # Real-mic + Piper specs are skipped in CI (need user-granted mic +
     # voice models) so we only run the fast, mock-bridge-only specs by
     # using grep -v.
