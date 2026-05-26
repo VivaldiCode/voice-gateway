@@ -5,6 +5,20 @@ export type ActivationMode = 'PUSH_TO_TALK' | 'WAKE_WORD';
 export type SttProvider = 'whisper_local' | 'openai_whisper';
 export type TtsProvider = 'piper_local' | 'elevenlabs';
 
+/**
+ * Where the conversation's LLM call lands.
+ *
+ * - 'hermes-bridge' (default) — bridge owns the LLM call. Current behavior.
+ *   The desktop streams audio/transcripts to Hermes; Hermes returns text.
+ * - 'claude' / 'ollama' / 'grok' / 'chatgpt' — bridge is bypassed. The
+ *   desktop calls the chosen LLM directly and feeds the response into TTS.
+ *   See {@link LlmSettings} for the per-provider knobs.
+ *
+ * Issue #55 (parent) + sub-issues #56–#63. Adapter implementations and
+ * orchestrator routing land in their own sub-issue PR commits.
+ */
+export type LlmProvider = 'hermes-bridge' | 'claude' | 'ollama' | 'grok' | 'chatgpt';
+
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export interface ConnectionInfo {
@@ -59,6 +73,50 @@ export interface SttSettings {
   language: LanguageCode | 'auto';
   whisperLocal: WhisperLocalConfig;
   openai: OpenAiSttConfig;
+}
+
+export interface ClaudeConfig {
+  apiKey: string;
+  model: string;
+}
+
+export interface OllamaConfig {
+  baseUrl: string;
+  model: string;
+}
+
+export interface GrokConfig {
+  apiKey: string;
+  model: string;
+}
+
+export interface ChatGptConfig {
+  apiKey: string;
+  model: string;
+}
+
+/**
+ * Multi-LLM configuration. The active provider is selected by
+ * {@link LlmSettings.provider}; only that provider's sub-block is consulted
+ * at runtime. The other blocks are still persisted so a user can switch
+ * back and forth without re-entering keys.
+ *
+ * `'hermes-bridge'` is the default — meaning the bridge owns the LLM call
+ * (current behavior). Choosing any other provider routes the turn locally
+ * via the matching {@link LlmAdapter}.
+ */
+export interface LlmSettings {
+  provider: LlmProvider;
+  claude: ClaudeConfig;
+  ollama: OllamaConfig;
+  grok: GrokConfig;
+  chatgpt: ChatGptConfig;
+  /**
+   * Trim conversation history to this many user/assistant turn pairs
+   * when sending to the LLM. Larger = more context, more tokens, more
+   * cost. Default {@link DEFAULT_LLM_HISTORY_TURNS}. (Tracked in sub-issue #62.)
+   */
+  historyTurns: number;
 }
 
 /**
@@ -175,6 +233,8 @@ export interface Settings {
   connection: ConnectionSettings;
   /** Persisted transcript window. v5 schema. */
   transcript: TranscriptHistorySettings;
+  /** Multi-LLM (Claude/Ollama/Grok/ChatGPT) configuration. v7 schema. */
+  llm: LlmSettings;
   /** Bumped when the schema changes. Used by the store for migrations. */
   schemaVersion: number;
 }
