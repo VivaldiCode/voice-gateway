@@ -27,9 +27,14 @@ export function Logo({
   if (!wordmark) {
     return <LogoMark size={size} className={className} {...rest} />;
   }
+  // Issue #26 — in the wordmark variant the visible `<span>Voice Gateway</span>`
+  // already gives the cluster its accessible name. Marking the SVG as
+  // decorative here (aria-hidden + dropped role/aria-label, via the
+  // `decorative` prop) prevents screen readers from announcing
+  // "Voice Gateway, Voice Gateway" twice.
   return (
     <div className={`flex items-center gap-3 ${className ?? ''}`}>
-      <LogoMark size={size} />
+      <LogoMark size={size} decorative />
       <div className="flex flex-col leading-tight">
         <span className="text-base font-semibold tracking-tight text-white">
           Voice Gateway
@@ -42,16 +47,24 @@ export function Logo({
 
 function LogoMark({
   size = 48,
+  decorative = false,
   className,
   ...rest
-}: SVGProps<SVGSVGElement> & { size?: number }): JSX.Element {
+}: SVGProps<SVGSVGElement> & { size?: number; decorative?: boolean }): JSX.Element {
+  // When `decorative` is true (wordmark cluster, issue #26) the SVG is purely
+  // visual — a sibling element carries the accessible name. We drop role +
+  // aria-label and add aria-hidden so assistive tech ignores the SVG.
+  // Default (`decorative=false`) keeps the icon-only variant labeled — without
+  // a wordmark sibling, the SVG IS the accessible name.
+  const a11yProps = decorative
+    ? ({ 'aria-hidden': true as const } as const)
+    : ({ role: 'img' as const, 'aria-label': 'Voice Gateway' } as const);
   return (
     <svg
       viewBox="0 0 1024 1024"
       width={size}
       height={size}
-      role="img"
-      aria-label="Voice Gateway"
+      {...a11yProps}
       className={className}
       {...rest}
     >
