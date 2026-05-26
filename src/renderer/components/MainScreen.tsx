@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Settings as SettingsIcon, Volume2 as VolumeOnIcon, VolumeX as VolumeOffIcon, X as XIcon } from 'lucide-react';
+import { Headphones as HeadphonesIcon, Mic as MicIcon, Settings as SettingsIcon, Volume2 as VolumeOnIcon, VolumeX as VolumeOffIcon, X as XIcon } from 'lucide-react';
 import { Button } from './Button';
 import { CallButton } from './CallButton';
 import { CommandHint } from './CommandHint';
+import { DevicePicker } from './DevicePicker';
 import { Logo } from './Logo';
 import { StateOrb } from './StateOrb';
 import { TranscriptView } from './TranscriptView';
@@ -302,6 +303,39 @@ export function MainScreen({ bridgeUrl, onOpenSettings }: MainScreenProps): JSX.
         <div className="flex items-center justify-between gap-2 px-4 pb-2">
           <Logo size={28} wordmark />
           <div className="flex items-center gap-1">
+            {/* Issue #20: minimalist mic + speaker pickers next to the
+                mute/settings buttons. Lets the user hot-swap devices
+                without opening Settings → Microfone. Persists via the
+                same settings.audio.{input,output}DeviceId keys the
+                Settings panel uses, so the two surfaces stay in sync
+                and the orchestrator's existing reconciliation picks
+                up the new device live. */}
+            <DevicePicker
+              kind="audioinput"
+              Icon={MicIcon}
+              ariaLabel={t.app.micPickerAria}
+              popoverTitle={t.app.micPickerTitle}
+              noLabelsHint={t.app.devicePickerNoLabels}
+              defaultLabel={t.app.devicePickerDefault}
+              selectedId={settings?.audio.inputDeviceId ?? null}
+              onSelect={(deviceId) => {
+                void window.vg.settings.set({ audio: { inputDeviceId: deviceId } });
+              }}
+              testId="mic-picker"
+            />
+            <DevicePicker
+              kind="audiooutput"
+              Icon={HeadphonesIcon}
+              ariaLabel={t.app.speakerPickerAria}
+              popoverTitle={t.app.speakerPickerTitle}
+              noLabelsHint={t.app.devicePickerNoLabels}
+              defaultLabel={t.app.devicePickerDefault}
+              selectedId={settings?.audio.outputDeviceId ?? null}
+              onSelect={(deviceId) => {
+                void window.vg.settings.set({ audio: { outputDeviceId: deviceId } });
+              }}
+              testId="speaker-picker"
+            />
             <Button
               variant="ghost"
               size="sm"
