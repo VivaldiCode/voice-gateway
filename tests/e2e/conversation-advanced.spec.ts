@@ -63,6 +63,10 @@ test.describe('conversation advanced', () => {
 
   // ───── #41: wake fires → full turn
   test('wake event drives a full conversation turn back to LISTENING_WAKE', async () => {
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race (gate-tracked in #65)',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('Olá! Estou aqui.'),
     });

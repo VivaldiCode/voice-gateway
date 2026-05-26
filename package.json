@@ -1,6 +1,6 @@
 {
   "name": "voice-gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Voice gateway for the Hermes agent — local-first STT/TTS with optional cloud upgrades.",
   "main": "out/main/index.js",
   "type": "module",

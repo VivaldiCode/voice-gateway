@@ -227,20 +227,94 @@ We disable asar so the on-disk layout under `Contents/Resources/app/`
 is greppable. With ~50 MB of compiled output the size cost is
 negligible.
 
-## CI
+## CI / Release pipeline
 
-There isn't a CI pipeline today; releases are cut by hand:
+PR validation runs in
+[`.github/workflows/ci.yml`](https://github.com/VivaldiCode/voice-gateway/blob/main/.github/workflows/ci.yml)
+(lint + typecheck + vitest matrix + Playwright + Pytest + CodeQL).
+
+DMG / EXE / AppImage release runs in a separate workflow,
+[`.github/workflows/release.yml`](https://github.com/VivaldiCode/voice-gateway/blob/main/.github/workflows/release.yml),
+that fires on `v*` tag pushes (and on manual `workflow_dispatch` for
+ad-hoc testing). The split keeps PR runs cheap — six full installer
+builds is slow and only needed when shipping.
+
+### Build matrix
+
+Six binaries, one per (platform, arch) pair, six parallel jobs:
+
+| Platform | Arch  | Runner          | Artifact                                  |
+|----------|-------|-----------------|-------------------------------------------|
+| macOS    | arm64 | `macos-latest`  | `Voice Gateway-<v>-arm64.dmg`             |
+| macOS    | x64   | `macos-13`      | `Voice Gateway-<v>-x64.dmg`               |
+| Windows  | x64   | `windows-latest`| `Voice Gateway Setup <v>.exe`             |
+| Windows  | arm64 | `windows-latest`| `Voice Gateway Setup <v>-arm64.exe`       |
+| Linux    | x64   | `ubuntu-latest` | `Voice Gateway-<v>.AppImage`              |
+| Linux    | arm64 | `ubuntu-latest` | `Voice Gateway-<v>-arm64.AppImage`        |
+
+Why two different macOS runners: cross-build between mac arm64 and mac
+x64 from a single runner doesn't work reliably because
+`@electron/rebuild` needs the target arch's libraries on disk.
+Windows arm64 and Linux arm64 cross-build cleanly from x64 hosts
+because their installer payloads are the per-arch electron binary
+(downloaded by electron-builder) plus our pure-JS bundle.
+
+### Release flow
+
+```mermaid
+flowchart LR
+    Tag[git push origin v0.X.Y] --> Build[6× build matrix<br/>per platform/arch]
+    Build --> Upload[upload-artifact per job]
+    Upload --> Pub[release job<br/>downloads all + publishes]
+    Pub --> Rel[GitHub Release v0.X.Y<br/>6 assets attached]
+```
+
+1. Tag the release commit:
+   ```bash
+   git tag -a v0.X.Y -m "Voice Gateway 0.X.Y — <one-liner>"
+   git push origin v0.X.Y
+   ```
+2. The build matrix runs in parallel; each job uploads its artifacts.
+3. A final `release` job (only on tag pushes — not on
+   `workflow_dispatch`) downloads all six artifacts and publishes them
+   via
+   [`softprops/action-gh-release@v2`](https://github.com/softprops/action-gh-release).
+   Auto-generates release notes unless a manual `gh release create`
+   already ran for the same tag (in which case hand-written notes
+   survive and only the assets are updated).
+
+### The `--publish never` rule
+
+`electron-builder` is invoked with `--publish never` in every build
+job — without that flag it detects the tag context, decides it should
+publish to GitHub Releases itself, looks for `GH_TOKEN`, fails on the
+missing token, and crashes the build before any installer is written.
+
+The framework's rule: **exactly one publisher per release** —
+`softprops/action-gh-release@v2`. See issue #50 / PR #51 for the
+specific failure mode this guards against; the rule lives in this
+workflow's header comment too.
+
+### Ad-hoc local builds
+
+For local iteration the `build:*` npm scripts are enough — they never
+try to publish:
 
 ```bash
 npm test
-npm run build:mac
-ls release/*.dmg          # → Voice Gateway-0.1.0-arm64.dmg
-gh release create v0.1.0 release/*.dmg --generate-notes
+npm run build:mac          # macOS arm64 (current host's arch)
+npm run build:linux        # Linux x64
+npm run build:win          # Windows x64
+ls release/                # → Voice Gateway-<v>-<arch>.dmg/.exe/.AppImage
 ```
 
-A future GitHub Actions matrix would just add `macos-latest`,
-`ubuntu-latest`, `windows-latest` runners each running the matching
-`build:*` script and uploading the artifact.
+To build a specific cross-target locally, call electron-builder
+directly:
+
+```bash
+npm run build
+npx electron-builder --linux --arm64 --publish never
+```
 
 ## Troubleshooting build failures
 
