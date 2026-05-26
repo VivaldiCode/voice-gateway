@@ -42,6 +42,7 @@ mac:
     - target: dmg
       arch:
         - arm64
+        - x64
   hardenedRuntime: true
   gatekeeperAssess: false
   # Ad-hoc sign (identity: false → '-'). Gives the bundle a stable code
@@ -63,7 +64,10 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
 linux:
   target:
-    - AppImage
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
   category: AudioVideo
   icon: resources/icon.png
 win:
@@ -71,6 +75,7 @@ win:
     - target: nsis
       arch:
         - x64
+        - arm64
   icon: resources/icon.ico
 nsis:
   oneClick: false
