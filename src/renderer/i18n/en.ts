@@ -15,6 +15,12 @@ export const en: Dictionary = {
     windowTitle: (state) => `Voice Gateway — ${state}`,
     cancelCaptureAria: 'Cancel recording',
     notificationReply: 'Hermes replied',
+    micPickerAria: 'Choose microphone',
+    micPickerTitle: 'Microphone',
+    speakerPickerAria: 'Choose audio output',
+    speakerPickerTitle: 'Audio output',
+    devicePickerDefault: 'System default',
+    devicePickerNoLabels: 'Grant microphone permission to see device names.',
   },
   state: {
     IDLE: 'Ready',
