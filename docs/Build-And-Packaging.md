@@ -15,7 +15,8 @@ Pre-bundle Vite build:
 
 ```mermaid
 flowchart LR
-    Src[src/] --> Vite[electron-vite build]
+    Doc[build-doctor<br>tools/build-doctor.cjs] --> Vite[electron-vite build]
+    Src[src/] --> Vite
     Vite --> Out[out/main, out/preload, out/renderer]
     Out --> EB[electron-builder]
     Resources[resources/] --> EB
@@ -23,6 +24,39 @@ flowchart LR
     Pack --> Hook[afterPack hook<br>build/after-pack.cjs]
     Hook --> Dmg[release/*.dmg]
 ```
+
+### build-doctor (pre-flight)
+
+A ~50 ms Node script runs before every `build:mac|linux|win` and aborts
+the build if any of a small set of `node_modules` entry points have
+disappeared.
+
+The check exists because the repo is sometimes mounted from an external
+volume whose filesystem (exFAT, MS-DOS) doesn't preserve POSIX metadata
+the way APFS does. Individual files inside `node_modules` occasionally
+go missing without the parent tree being obviously broken — the most
+recent victim was
+`node_modules/builder-util/node_modules/fs-extra/lib/index.js` (issue
+#48), which made electron-builder explode at startup with
+`MODULE_NOT_FOUND`. Without the doctor the failure surfaces only
+after `electron-vite build` has already run (5–8 s of wasted work) and
+the error message points at builder-util internals, which is easy to
+misdiagnose.
+
+On failure the doctor prints the exact `rm -rf` + `npm install` command
+to run; see [[Troubleshooting#build-fails-fast-with-module_not_found-inside-node_modules]]
+for the full story.
+
+To run it standalone:
+
+```bash
+npm run build-doctor
+VG_BUILD_DOCTOR_VERBOSE=1 npm run build-doctor   # confirms which files were checked
+```
+
+The script is in CommonJS (`tools/build-doctor.cjs`) so it runs without
+any TypeScript pipeline — critical because that pipeline is itself one
+of the things being checked.
 
 ### electron-vite
 
@@ -217,6 +251,7 @@ A future GitHub Actions matrix would just add `macos-latest`,
 | Renderer blank after install                             | Vite's renderer outDir doesn't match `loadFile` path. The pattern is `out/renderer/index.html` → `join(__dirname, '../renderer/index.html')`. |
 | Microphone permission lost across rebuilds               | Ad-hoc signing failed silently; check the `[after-pack]` codesign output for "main signature: <stuff>". |
 | `hdiutil: create failed - No space left on device`       | The default `electron-builder` DMG path stages its temp file in `/private/var/folders/...` — i.e. on the system volume. If that volume is low on free space, `hdiutil` aborts even though the source bundle is small. **Workaround:** run `hdiutil create` manually with `TMPDIR` pointed at a roomier volume (typically the same drive that holds the source tree). The output DMG is identical for the end user; only the staging directory differs. |
+| `MODULE_NOT_FOUND` inside `node_modules/...` immediately after `electron-vite build` finishes | A file inside `node_modules` has disappeared, typically a deeply-nested entry point on external/exFAT volumes. The `build-doctor` pre-flight should now catch this **before** `electron-vite build` runs; if you see this after the doctor passed, add the missing path to `CRITICAL_FILES` in `tools/build-doctor.cjs` and open a follow-up issue. |
 
 Manual DMG when `/var/folders` is full:
 
