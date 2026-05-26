@@ -1,16 +1,37 @@
-# Release pipeline — builds + uploads the DMG when a `v*` tag is pushed.
+# Release pipeline — builds DMG/EXE/AppImage for macOS/Windows/Linux on
+# both arm64 and x64, then attaches all six artifacts to one GitHub
+# Release per tag.
 #
-# I7 + I10 (round 12): separate from ci.yml so PR runs don't cost a full
-# DMG build (which is slow + signs the bundle). Only fires when:
-#   - a tag like `v0.1.0` is pushed to the repo
-#   - someone manually dispatches the workflow (test the pipeline ad-hoc)
+# Triggers (see ci.yml for the PR validation pipeline — kept separate so
+# PRs don't pay the price of a six-platform build):
+#   - push of a `v*` tag                           → full build + Release
+#   - workflow_dispatch (no tag context)           → full build, no Release
 #
-# Notes:
-#   - macOS code-signing is left as-is (currently identity=null in
-#     electron-builder.yml). To enable real signing later, attach the
-#     CSC_LINK + CSC_KEY_PASSWORD secrets and set NODE_ENV=production.
-#   - The DMG ends up in `release/`. We attach it to the GitHub Release
-#     created for the tag.
+# Per-target runners:
+#   - macos-latest is arm64 → builds the arm64 DMG natively
+#   - macos-13 is Intel x64 → builds the x64 DMG natively
+#     (cross-build mac arm64 ↔ x64 from a single runner doesn't work
+#      reliably because @electron/rebuild needs the target arch's libs.)
+#   - windows-latest builds both x64 and arm64 (electron-builder
+#     handles win arm64 cross-build from x64 cleanly)
+#   - ubuntu-latest builds both x64 and arm64 (linux arm64 cross-build
+#     works because the AppImage payload is just the electron binary —
+#     downloaded per-arch — plus our JS bundle, no native rebuild)
+#
+# Publishing:
+#   Exactly one publisher: `softprops/action-gh-release` runs once at
+#   the end, after all six builds finish. `electron-builder` is told
+#   `--publish never` everywhere — without that flag it would see the
+#   tag context, try to publish itself, fail on missing GH_TOKEN, and
+#   crash the build before the artifact is even written. (Issue #50,
+#   superseded into this rewrite.)
+#
+# Build-doctor pre-flight (from #48):
+#   Each build job calls `npm run build-doctor` first — a ~50 ms Node
+#   script that verifies the critical node_modules entry points are
+#   present. Catches a class of "individual file went missing" failures
+#   we've seen on external-volume dev machines; harmless on CI runners
+#   where node_modules just got freshly installed by `npm ci`.
 
 name: Release
 
@@ -20,31 +41,110 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # needed to create the Release + upload assets
+  contents: write  # needed by softprops/action-gh-release for the Release
 
 jobs:
-  build-mac:
-    runs-on: macos-latest
-    timeout-minutes: 45
+  build:
+    name: Build (${{ matrix.platform }} ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+            target_flag: --mac --arm64
+          - os: macos-13
+            platform: mac
+            arch: x64
+            target_flag: --mac --x64
+          - os: windows-latest
+            platform: win
+            arch: x64
+            target_flag: --win --x64
+          - os: windows-latest
+            platform: win
+            arch: arm64
+            target_flag: --win --arm64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            target_flag: --linux --x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: arm64
+            target_flag: --linux --arm64
+
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
+
       - name: Install
         run: npm ci
-      - name: Build packaged .app + DMG
-        run: npm run build:mac
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v7
+
+      - name: Build (${{ matrix.platform }} ${{ matrix.arch }})
+        # `npm run build` runs electron-vite for main/preload/renderer
+        # bundles (same on every OS). electron-builder then wraps it in
+        # the per-target installer. `--publish never` is load-bearing —
+        # see the file header for why. `build-doctor` is the cheap
+        # pre-flight from #48 that guards against silently-corrupted
+        # node_modules.
+        shell: bash
+        run: |
+          npm run build-doctor
+          npm run build
+          npx electron-builder ${{ matrix.target_flag }} --publish never
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Voice-Gateway-${{ github.ref_name }}-arm64.dmg
-          path: release/*.dmg
+          name: voice-gateway-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.dmg.blockmap
+            release/*.exe
+            release/*.exe.blockmap
+            release/*.AppImage
+            release/latest*.yml
+          if-no-files-found: error
           retention-days: 30
-      - name: Create or update GitHub Release with DMG
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release
+          pattern: voice-gateway-${{ github.ref_name }}-*
+          merge-multiple: true
+
+      - name: Inspect what was downloaded
+        run: |
+          echo "Release directory contents:"
+          ls -lh release/ || true
+
+      - name: Publish to GitHub Release
+        # Single publisher in the whole workflow. Creates the Release if
+        # absent, updates it (adds/replaces assets) if a manual `gh release
+        # create` already ran for this tag. Auto-generates release notes
+        # *only* when no manual notes exist, so a hand-written description
+        # survives.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
-          files: release/*.dmg
+          fail_on_unmatched_files: true
+          files: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
