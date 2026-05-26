@@ -1,0 +1,74 @@
+# CodeQL code scanning — issue #22.
+#
+# Runs the GitHub-maintained query packs against TypeScript (renderer +
+# main + preload) and Python (hermes-voice-bridge). Findings land in the
+# repo's Security tab; the workflow itself doesn't fail the build on
+# findings — it just publishes them, so a single new pattern doesn't
+# block unrelated PRs while we triage. Branch protection (issue #21)
+# can require this check separately if/when the team decides to make
+# it gating.
+#
+# Triggers:
+#   - pull_request to main — catches issues before they land
+#   - push to main — keeps the baseline up-to-date after merge
+#   - weekly schedule — catches new advisories that flag existing code
+#                       even when no PR has run (e.g. a new CodeQL
+#                       query pack release)
+#
+# Permissions are scoped to the minimum CodeQL needs to upload results.
+
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Sundays 03:00 UTC. Off-peak so we don't fight other scheduled jobs.
+    - cron: '0 3 * * 0'
+
+permissions:
+  contents: read
+  # security-events:write is required so the Action can post findings to
+  # the Security tab. actions:read is for the autobuild step on Python.
+  actions: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # `javascript-typescript` covers both JS and TS in one pass —
+        # CodeQL stopped supporting `javascript` separately in v3.
+        # `python` covers the hermes-voice-bridge server.
+        language: ['javascript-typescript', 'python']
+    steps:
+      - name: Checkout
+        # actions/checkout@v4 pinned to commit SHA — supply-chain hardening
+        # per issue #22. Dependabot will open PRs to bump these SHAs as
+        # the actions release new versions.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Initialise CodeQL
+        # github/codeql-action@v3 pinned to commit SHA.
+        uses: github/codeql-action/init@fee9466b8957867761f2d78f922ab084e3e2dd17
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds high-precision queries beyond the
+          # default set. security-and-quality would add maintainability
+          # noise we don't want yet — stay focused on actual vulns.
+          queries: security-extended
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@fee9466b8957867761f2d78f922ab084e3e2dd17
+      - name: Analyze
+        uses: github/codeql-action/analyze@fee9466b8957867761f2d78f922ab084e3e2dd17
+        with:
+          category: '/language:${{ matrix.language }}'

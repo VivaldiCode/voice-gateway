@@ -92,6 +92,12 @@ pytest                                # 13 tests
 HERMES_VOICE_BRIDGE_CONFIG=dev-config.toml hermes-voice-bridge
 ```
 
+## Security
+
+Please don't open public issues for security reports — see
+[SECURITY.md](./SECURITY.md) for the private disclosure channel and
+the project's threat model + supply-chain hardening.
+
 ## License
 
 MIT.

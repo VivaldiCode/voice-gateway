@@ -26,6 +26,12 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
+    // Pure-data i18n catalogue (string/function leaves only) — safe to
+    // include in the node tsproject because it doesn't pull in DOM types.
+    // Lets `tests/unit/i18n-dictionary.test.ts` import the dictionaries
+    // directly without TS6307 ("file not listed in project").
+    "src/renderer/i18n/pt.ts",
+    "src/renderer/i18n/en.ts",
     "electron.vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
