@@ -11,6 +11,11 @@
 #     CSC_LINK + CSC_KEY_PASSWORD secrets and set NODE_ENV=production.
 #   - The DMG ends up in `release/`. We attach it to the GitHub Release
 #     created for the tag.
+#   - Single publisher: `softprops/action-gh-release@v2` (last step) owns
+#     uploading the DMG to the Release. `electron-builder` is told not to
+#     publish (`--publish never`) — otherwise it sees the tag context,
+#     tries to publish itself, fails on missing `GH_TOKEN`, and aborts
+#     the whole job before the DMG is even written. (Issue #50.)
 
 name: Release
 
@@ -35,7 +40,12 @@ jobs:
       - name: Install
         run: npm ci
       - name: Build packaged .app + DMG
-        run: npm run build:mac
+        # Bypass the shared `build:mac` npm script so we can pin
+        # `--publish never` here without touching package.json (which is
+        # currently in flight in PR #49). See issue #50.
+        run: |
+          npm run build
+          npx electron-builder --mac --arm64 --publish never
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v7
         with:

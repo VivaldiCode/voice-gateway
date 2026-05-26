@@ -193,20 +193,53 @@ We disable asar so the on-disk layout under `Contents/Resources/app/`
 is greppable. With ~50 MB of compiled output the size cost is
 negligible.
 
-## CI
+## CI / Release pipeline
 
-There isn't a CI pipeline today; releases are cut by hand:
+PR validation runs in
+[`.github/workflows/ci.yml`](https://github.com/VivaldiCode/voice-gateway/blob/main/.github/workflows/ci.yml)
+(lint + typecheck + vitest matrix + Playwright + Pytest + CodeQL).
+
+DMG release runs in a separate workflow,
+[`.github/workflows/release.yml`](https://github.com/VivaldiCode/voice-gateway/blob/main/.github/workflows/release.yml),
+that fires on `v*` tag pushes. The split keeps PR runs cheap — the
+DMG build is slow and is only needed when shipping.
+
+Release flow:
+
+1. Tag the release commit:
+   ```bash
+   git tag -a v0.X.Y -m "Voice Gateway 0.X.Y — <one-liner>"
+   git push origin v0.X.Y
+   ```
+2. The workflow runs on `macos-latest`:
+   `npm ci` → `npm run build` →
+   `npx electron-builder --mac --arm64 --publish never` →
+   upload artifact → publish/update the GitHub Release via
+   [`softprops/action-gh-release@v2`](https://github.com/softprops/action-gh-release).
+3. The DMG ends up attached to the Release; release notes are
+   auto-generated unless a manual `gh release create` was run first
+   for the same tag (in which case the manual notes survive and
+   only the DMG asset gets updated).
+
+The `--publish never` flag is load-bearing: without it,
+`electron-builder` detects the tag context, tries to publish to
+GitHub Releases itself, fails on missing `GH_TOKEN`, and aborts the
+whole job before the DMG is written. The rule: **exactly one
+publisher per release** — `softprops/action-gh-release@v2`. See
+issue #50 for the failure mode this guards against.
+
+For ad-hoc local builds, the `build:mac` npm script is enough; it
+runs on the local machine and never tries to publish:
 
 ```bash
 npm test
 npm run build:mac
-ls release/*.dmg          # → Voice Gateway-0.1.0-arm64.dmg
-gh release create v0.1.0 release/*.dmg --generate-notes
+ls release/*.dmg          # → Voice Gateway-0.X.Y-arm64.dmg
 ```
 
-A future GitHub Actions matrix would just add `macos-latest`,
-`ubuntu-latest`, `windows-latest` runners each running the matching
-`build:*` script and uploading the artifact.
+A future Linux + Windows publish matrix would add `ubuntu-latest`
++ `windows-latest` runners with the matching `build:linux` /
+`build:win` scripts. Today only macOS arm64 ships through CI.
 
 ## Troubleshooting build failures
 
