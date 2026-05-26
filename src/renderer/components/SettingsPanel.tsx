@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Volume2, Mic2, Cable, Sliders, AlertTriangle, RefreshCw, Loader2, Play, Download } from 'lucide-react';
 import { Button } from './Button';
 import { CommandHint } from './CommandHint';
+import { Logo } from './Logo';
 import { cn } from '../lib/cn';
 import {
   CLIENT_VERSION,
@@ -89,27 +90,53 @@ export function SettingsPanel({
       )}
       onClick={layout === 'side' ? (e) => e.stopPropagation() : undefined}
     >
-      <header className="vg-drag flex items-center justify-between border-b border-bg-subtle pr-3 pt-4 pb-3 pl-[88px]">
-        <h2 className="text-lg font-semibold">Definições</h2>
-        <div className="flex items-center gap-3">
-          {savedFlash && (
-            <span
-              className="vg-no-drag rounded-full bg-green-700/40 px-2 py-0.5 text-[10px] text-green-200 transition-opacity"
-              data-testid="settings-saved-indicator"
-              role="status"
-              aria-live="polite"
-            >
-              ✓ Guardado
-            </span>
+      {/* Issue #19 round-13: mirror MainScreen's two-row header so the
+          Settings window has identical visual rhythm and the macOS
+          hiddenInset traffic-lights stop colliding with the title at
+          narrow widths.
+          - Row 1: 28 px transparent spacer that overlays the traffic
+                   lights — only in the dedicated `window` layout where
+                   those traffic lights exist. In the legacy `side` drawer
+                   layout there's no titlebar inside the panel so we
+                   skip the spacer + use normal top padding instead.
+          - Row 2: logo on the left (matches main visually), savedFlash
+                   + close button on the right. */}
+      <header
+        className="vg-drag flex flex-col gap-0 border-b border-bg-subtle [&_button]:vg-no-drag"
+        data-testid="settings-header"
+      >
+        {layout === 'window' && <div className="h-7" aria-hidden="true" />}
+        <div
+          className={cn(
+            'flex items-center justify-between gap-2 px-4 pb-2',
+            layout === 'window' ? '' : 'pt-3',
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
-            aria-label="Fechar"
-          >
-            fechar
-          </button>
+        >
+          <div className="flex items-center gap-2">
+            <Logo size={24} wordmark />
+            <h2 className="text-xs uppercase tracking-wider text-zinc-400">Definições</h2>
+          </div>
+          <div className="flex items-center gap-3">
+            {savedFlash && (
+              <span
+                className="vg-no-drag rounded-full bg-green-700/40 px-2 py-0.5 text-[10px] text-green-200 transition-opacity"
+                data-testid="settings-saved-indicator"
+                role="status"
+                aria-live="polite"
+              >
+                ✓ Guardado
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="vg-no-drag rounded px-2 py-1 text-sm text-zinc-400 hover:text-white"
+              aria-label="Fechar"
+              data-testid="settings-close"
+            >
+              fechar
+            </button>
+          </div>
         </div>
       </header>
       <nav className="flex shrink-0 flex-wrap gap-1 border-b border-bg-subtle px-3 py-2 text-xs">
