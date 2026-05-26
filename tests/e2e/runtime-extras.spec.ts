@@ -62,6 +62,15 @@ test.describe('runtime extras', () => {
   // assert the production data flow + no-crash contract while a turn is
   // mid-flight (the hardest moment for a live AudioContext to be re-routed).
   test('outputDeviceId broadcast reaches the renderer while SPEAKING and produces no error', async () => {
+    // Issue #30 (user-approved Option B): SPEAKING state transition is
+    // dropped on headless macOS CI under CPU pressure, same family as
+    // the other bridge-state-pipeline flakes. Was in the "flaky" bucket
+    // but graduated to deterministic-fail. Spec passes on dev macOS
+    // in non-headless mode.
+    test.skip(
+      process.env['VG_E2E_HEADLESS'] === '1',
+      'see issue #30 — headless macOS state-pipeline race',
+    );
     bridge = await startMockBridge({
       onClientMessage: scriptedTextReply('Olá, a tocar.'),
     });
