@@ -263,25 +263,41 @@ because their installer payloads are the per-arch electron binary
 
 ```mermaid
 flowchart LR
-    Tag[git push origin v0.X.Y] --> Build[6× build matrix<br/>per platform/arch]
+    Merge[PR squash-merged<br/>into main] --> AT[auto-tag.yml<br/>computes next semver]
+    AT --> Tag[v0.X.Y pushed]
+    Tag --> Sync[release.yml syncs<br/>package.json with tag]
+    Sync --> Build[6× build matrix<br/>per platform/arch]
     Build --> Upload[upload-artifact per job]
     Upload --> Pub[release job<br/>downloads all + publishes]
     Pub --> Rel[GitHub Release v0.X.Y<br/>6 assets attached]
 ```
 
-1. Tag the release commit:
-   ```bash
-   git tag -a v0.X.Y -m "Voice Gateway 0.X.Y — <one-liner>"
-   git push origin v0.X.Y
-   ```
-2. The build matrix runs in parallel; each job uploads its artifacts.
-3. A final `release` job (only on tag pushes — not on
+End-to-end the committer pushes a PR; everything past the squash-merge
+is automated.
+
+1. **PR squash-merged** into `main`.
+2. **`auto-tag.yml`** runs on the merge commit, reads the squash-commit
+   subject, computes the next semver:
+   - `feat:` / `feat(scope):` → minor bump
+   - `feat!:` / `BREAKING CHANGE` in body → major bump
+   - anything else → patch bump
+   - `[skip-tag]` in the commit message → opt out
+3. `v0.X.Y` pushed; `release.yml` fires on the tag push.
+4. **`release.yml` syncs `package.json`** with the pushed tag (in-place
+   on the runner, no commit) so the DMG/EXE/AppImage filenames track
+   the actual release version, not the stale `package.json` value.
+5. The build matrix runs in parallel; each job uploads its artifacts.
+6. A final `release` job (only on tag pushes — not on
    `workflow_dispatch`) downloads all six artifacts and publishes them
    via
    [`softprops/action-gh-release@v2`](https://github.com/softprops/action-gh-release).
    Auto-generates release notes unless a manual `gh release create`
    already ran for the same tag (in which case hand-written notes
    survive and only the assets are updated).
+
+Manual tag push is still supported — useful for cutting an explicit
+release (`git tag -a v0.X.Y && git push origin v0.X.Y`) without
+relying on the auto-tag bump rule.
 
 ### The `--publish never` rule
 
