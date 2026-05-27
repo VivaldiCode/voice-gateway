@@ -45,13 +45,49 @@ updates:
         applies-to: security-updates
         patterns:
           - '*'
-    # Ignore Electron majors — we coordinate those manually because
-    # they ship behaviour changes (e.g. session API tweaks, autoUpdater
-    # cert rotation) that need code changes elsewhere.
+    # Skip major-version PRs on packages that are pinned by design
+    # pending coordinated upgrade work. Security advisories ALWAYS
+    # override `ignore` so CVE bumps still arrive. (Issue #47.)
+    #
+    # Each block points at the tracking issue that will eventually
+    # unblock the major bump. When that tracking issue closes, remove
+    # the matching ignore entry here so Dependabot can resume offering
+    # the major.
     ignore:
+      # Electron + electron-builder — coordinated under #45 (Vite 8 +
+      # Electron 39 + plugin-react 6). Electron majors ship behaviour
+      # changes (e.g. session API tweaks, autoUpdater cert rotation)
+      # that need code changes elsewhere.
       - dependency-name: 'electron'
         update-types: ['version-update:semver-major']
       - dependency-name: 'electron-builder'
+        update-types: ['version-update:semver-major']
+      # Vite + plugin-react — coordinated under #45. plugin-react v6
+      # requires Vite 8, and Vite 8 cascades through electron-vite,
+      # vitest, and our `vite.config.ts`. Previously closed PRs: #39, #43.
+      - dependency-name: 'vite'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@vitejs/plugin-react'
+        update-types: ['version-update:semver-major']
+      # React + types — coordinated under #46 (React 19 migration).
+      # react-dom v19 requires react v19 AND @types/react v19. Previously
+      # closed PR: #42.
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/react-dom'
+        update-types: ['version-update:semver-major']
+      # ESLint + ecosystem — eslint v9 requires the flat-config migration
+      # (eslint.config.js). eslint-plugin-react-hooks v7 requires React 19
+      # AND eslint flat config. Previously closed PRs: #40 (react-hooks),
+      # #41 (eslint). When we migrate ESLint config, open a dedicated
+      # tracking issue and remove these.
+      - dependency-name: 'eslint'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'eslint-plugin-react-hooks'
         update-types: ['version-update:semver-major']
 
   # ── pip (hermes-voice-bridge) ───────────────────────────────────────
