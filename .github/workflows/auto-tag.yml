@@ -1,0 +1,109 @@
+# Auto-tag — bumps semver and pushes a `v*` tag on every merge to `main`.
+#
+# The new tag fires `release.yml`, which produces the multi-platform
+# installer matrix and publishes the GitHub Release. End-to-end the
+# pipeline becomes:
+#
+#   PR squash-merged into main
+#     → this workflow runs
+#     → next semver computed from the squash-commit message
+#     → tag v<next> pushed
+#     → release.yml runs (matrix build + Release publish)
+#
+# Bump rule (Conventional-Commits-flavoured):
+#   - subject `feat:` / `feat(scope):`              → minor bump
+#   - subject `feat!:` / body contains `BREAKING CHANGE` → major bump
+#   - everything else (fix, chore, docs, refactor)  → patch bump
+#
+# Opt-out: include `[skip-tag]` anywhere in the squash commit message
+# to suppress the bump (typically for doc-only fixes that don't deserve
+# a release).
+#
+# Loop guard: the only thing this workflow pushes is the tag itself —
+# never a commit to `main`. So the `push: branches: [main]` trigger
+# can't re-fire from anything this workflow does. Belt-and-braces: we
+# also skip when the head commit author is the GitHub Actions bot,
+# defending against any future workflow that pushes back to main.
+#
+# Tracking: issue #54.
+
+name: Auto-tag on merge to main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # needed to push the new tag
+
+concurrency:
+  group: auto-tag
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: |
+      !contains(github.event.head_commit.message, '[skip-tag]') &&
+      github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Full history so `git describe --tags` finds the last v* tag.
+          fetch-depth: 0
+          # Default GITHUB_TOKEN is fine for pushing tags — tags aren't
+          # branch-protected. (Branch protection on `main` doesn't block
+          # tag pushes; only commit pushes to main itself are blocked.)
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute next semver from commit message
+        id: ver
+        # `MSG` env keeps the commit body safe from shell injection
+        # (it can contain quotes, backticks, $-expansions, …).
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest=$(git describe --tags --abbrev=0 --match='v*' 2>/dev/null || echo 'v0.0.0')
+          current="${latest#v}"
+          IFS=. read -r major minor patch <<< "$current"
+          # Default = patch.
+          bump=patch
+          if echo "$MSG" | grep -qE 'BREAKING[[:space:]]CHANGE'; then
+            bump=major
+          elif echo "$MSG" | head -1 | grep -qE '^[a-z]+(\(.+\))?!:'; then
+            bump=major
+          elif echo "$MSG" | head -1 | grep -qE '^(feat|feature)(\(.+\))?:'; then
+            bump=minor
+          fi
+          case "$bump" in
+            major) next="$((major + 1)).0.0" ;;
+            minor) next="$major.$((minor + 1)).0" ;;
+            patch) next="$major.$minor.$((patch + 1))" ;;
+          esac
+          echo "Bumping $latest → v$next ($bump from commit subject)"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Create + push tag
+        env:
+          NEXT: ${{ steps.ver.outputs.next }}
+          BUMP: ${{ steps.ver.outputs.bump }}
+          SHA: ${{ github.event.head_commit.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Refuse to create a duplicate tag (defensive — concurrency
+          # group should prevent this, but if someone manually pushed
+          # v$NEXT already we don't want to fail noisily).
+          if git rev-parse --quiet --verify "refs/tags/v$NEXT" >/dev/null; then
+            echo "Tag v$NEXT already exists — skipping."
+            exit 0
+          fi
+          git tag -a "v$NEXT" -m "Voice Gateway v$NEXT ($BUMP bump, auto-tagged from $SHA)" "$SHA"
+          git push origin "v$NEXT"
+          echo "Pushed tag v$NEXT — release.yml will pick it up."

@@ -88,6 +88,21 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Sync package.json version with tag (no commit)
+        # Without this, the DMG/EXE/AppImage filenames track the stale
+        # package.json `version` field instead of the tag that fired
+        # this workflow. We only sync when fired from a tag — manual
+        # workflow_dispatch leaves package.json alone so iterating on
+        # the workflow itself doesn't change every filename.
+        # Tracked in issue #54.
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Syncing package.json version → $VERSION (in-place, no commit)"
+          npm version --no-git-tag-version --allow-same-version "$VERSION"
+
       - name: Build (${{ matrix.platform }} ${{ matrix.arch }})
         # `npm run build` runs electron-vite for main/preload/renderer
         # bundles (same on every OS). electron-builder then wraps it in

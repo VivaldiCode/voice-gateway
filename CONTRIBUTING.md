@@ -1,27 +1,101 @@
 # Contributing to Voice Gateway
 
-## Pipeline
+## Pipeline (V2 — non-negotiable)
 
-Every change lands through a PR. Direct pushes to `main` are blocked
-by branch protection (see [Repository rules](#repository-rules) below).
+Every change lands through this five-step flow. Direct pushes to `main`
+are blocked by branch protection (see [Repository rules](#repository-rules)
+below). Quoted verbatim from the project rules to preserve intent:
 
-For each piece of work — bug, improvement, refactor:
+> 1. Crie uma issue no GitHub e quero que detalhe ao máximo possível o
+>    problema ou melhoria nesta issue — **apenas uma issue por problema**.
+> 2. Depois crie uma branch no padrão de **gitflow** para resolver a
+>    task em questão.
+> 3. Depois faça o **PR para a main e associe ao issue**, dispare o
+>    **sub-agente** para fazer o PR review do código. Se for encontrado
+>    algum problema o sub-agente deve corrigir ele até estar resolvido
+>    e **todos os testes passarem — Unit Test e E2E**. Resolva todos
+>    os erros até tudo passar.
+> 4. Gere uma **nova tag de versão** a cada vez que um PR for merged
+>    com a main.
+> 5. Gere uma **nova release** com base na main descrevendo a
+>    atualização dela — **Windows, mac, linux**, tanto versões
+>    **amd64 como arm** também.
 
-1. **Open a GitHub issue** describing the problem or improvement in
-   detail. One issue per problem.
-2. **Branch from `main`** using gitflow naming:
-   - `feature/<topic>-issue-<n>` for new functionality
-   - `fix/<topic>-issue-<n>` for bug fixes
-   - `chore/<topic>` for infrastructure / tooling
-   - `docs/<topic>` for documentation-only changes
-3. **Open a PR** to `main`, link the issue with `Closes #<n>` in the
-   description so it auto-closes on merge.
-4. **Review pass**: a code-review sub-agent (or human reviewer) walks
-   the diff, flags issues, fixes them in additional commits on the
-   same branch, and re-runs tests until everything is green.
-5. **Merge**: only when **every** required CI check is green AND every
-   review thread is resolved. Squash-merge is the default — keeps
-   `main`'s history linear.
+### Operational rules
+
+- **One issue per problem.** No grab-bag PRs.
+- **Gitflow naming**:
+  - `feature/<topic>-issue-<n>` — new functionality
+  - `fix/<topic>-issue-<n>` — bug fix
+  - `chore/<topic>-issue-<n>` — infrastructure / tooling
+  - `docs/<topic>-issue-<n>` — documentation-only
+- **PR body must contain `Closes #<n>`** so the issue auto-closes on merge.
+- **Sub-agent verdict-and-fix loop**: a code-review sub-agent walks the
+  diff, opens additional commits on the same branch to fix findings,
+  and re-runs tests until everything is green. See
+  [`docs/Agents.md`](docs/Agents.md) for the sub-agent contract.
+- **Squash-merge** is the default. Keeps `main`'s history one-commit-per-PR.
+- **Steps 4 + 5 are automated** by
+  [`.github/workflows/auto-tag.yml`](.github/workflows/auto-tag.yml)
+  (bumps semver from the squash-commit message and pushes `v<next>`)
+  and [`.github/workflows/release.yml`](.github/workflows/release.yml)
+  (6-way build matrix + single Release publish). The committer doesn't
+  have to think about either.
+
+### Exception: multi-context features → parent + sub-issues + ONE PR
+
+Some features are coherent but span several sub-areas. Splitting them
+across multiple PRs creates artificial coupling (PR B blocks on A,
+B's CI runs against incomplete A, reviewer needs both diffs open).
+
+The pattern:
+
+1. **Parent issue** describes the whole feature in user-visible terms.
+2. **Sub-issues** (one per sub-area) created and linked via GitHub's
+   native sub-issue feature:
+   ```bash
+   SUB=$(gh issue create --title "feat(x): ..." --body "..." | grep -oP '/issues/\K\d+$')
+   SUB_ID=$(gh api repos/{owner}/{repo}/issues/$SUB --jq .id)
+   gh api -X POST repos/{owner}/{repo}/issues/$PARENT/sub_issues -F sub_issue_id=$SUB_ID
+   ```
+   Use `-F` (integer), not `-f` (string), for `sub_issue_id`.
+3. **One PR** that closes the parent **and** all sub-issues
+   (`Closes #N`, `Closes #N+1`, …). Commits inside the PR map to
+   sub-issues so the diff stays reviewable in chunks.
+
+Real example: PR #64 / issue #55 (multi-LLM) groups sub-issues #56–#63.
+
+### When you receive a Kanban card link
+
+Cards live on the
+[Voice Gateway Project board](https://github.com/users/VivaldiCode/projects/1/).
+When the user drops a card link in chat, the agent:
+
+1. Reads the card (title, body, comments, labels).
+2. Creates a GitHub issue mirroring the card, with an idempotency
+   marker (`<!-- project:card-id -->`) so re-runs don't duplicate.
+3. Cross-links — comments the issue number on the card; the issue body
+   links the card URL.
+4. Decides: single issue or parent + sub-issues (the exception above).
+5. Proceeds with steps 2 → 5 of the pipeline.
+
+The agent never asks for the pipeline rules to be repeated — they live
+in this file and in `docs/Agents.md`, both of which every sub-agent
+loads as a pre-flight requirement.
+
+### Bump rule (auto-tag)
+
+`auto-tag.yml` reads the squash-commit subject:
+
+| Subject pattern | Bump |
+|---|---|
+| `feat:` / `feat(scope):` | minor |
+| `feat!:` / commit body contains `BREAKING CHANGE` | major |
+| `fix:` / `chore:` / `docs:` / `refactor:` / anything else | patch |
+
+To skip the tag for a specific merge (e.g. a doc-only fix that doesn't
+deserve a release), include `[skip-tag]` anywhere in the squash commit
+message.
 
 ## Repository rules
 
