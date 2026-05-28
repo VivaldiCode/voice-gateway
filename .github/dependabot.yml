@@ -89,6 +89,13 @@ updates:
         update-types: ['version-update:semver-major']
       - dependency-name: 'eslint-plugin-react-hooks'
         update-types: ['version-update:semver-major']
+      # @types/node — major MUST track the Node runtime major. We use
+      # Node 22 in CI (matrix: 20 + 22) and the user-installed runtime;
+      # @types/node 25 would surface APIs Node 22 doesn't have, breaking
+      # typecheck. Pin to 22.x; revisit when we bump the Node baseline.
+      # Previously closed PR: #80. Tracked in #83.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
 
   # ── pip (hermes-voice-bridge) ───────────────────────────────────────
   - package-ecosystem: 'pip'
