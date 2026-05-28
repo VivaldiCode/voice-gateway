@@ -56,10 +56,11 @@ jobs:
             platform: mac
             arch: arm64
             target_flag: --mac --arm64
-          - os: macos-13
-            platform: mac
-            arch: x64
-            target_flag: --mac --x64
+          # mac-x64 dropped in #66 — GitHub macos-13 Intel runners had
+          # unbounded queue times that stalled the whole matrix. Apple
+          # has been Apple-Silicon-only on new Macs since 2023; the
+          # Intel-Mac user base is shrinking organically. Re-add when
+          # any of the conditions in #85 become true.
           - os: windows-latest
             platform: win
             arch: x64

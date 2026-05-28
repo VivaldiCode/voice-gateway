@@ -241,20 +241,24 @@ builds is slow and only needed when shipping.
 
 ### Build matrix
 
-Six binaries, one per (platform, arch) pair, six parallel jobs:
+Five binaries, one per (platform, arch) pair, five parallel jobs:
 
 | Platform | Arch  | Runner          | Artifact                                  |
 |----------|-------|-----------------|-------------------------------------------|
 | macOS    | arm64 | `macos-latest`  | `Voice Gateway-<v>-arm64.dmg`             |
-| macOS    | x64   | `macos-13`      | `Voice Gateway-<v>-x64.dmg`               |
 | Windows  | x64   | `windows-latest`| `Voice Gateway Setup <v>.exe`             |
 | Windows  | arm64 | `windows-latest`| `Voice Gateway Setup <v>-arm64.exe`       |
 | Linux    | x64   | `ubuntu-latest` | `Voice Gateway-<v>.AppImage`              |
 | Linux    | arm64 | `ubuntu-latest` | `Voice Gateway-<v>-arm64.AppImage`        |
 
-Why two different macOS runners: cross-build between mac arm64 and mac
-x64 from a single runner doesn't work reliably because
-`@electron/rebuild` needs the target arch's libraries on disk.
+**macOS Intel (x64) is intentionally not built.** GitHub's `macos-13`
+hosted-runner queue is unbounded in practice (we observed 1 h + stalls
+on every release tag we tried). Dropping it keeps the matrix completable
+within a predictable window. Apple has shipped Apple-Silicon-only Macs
+since 2023, so the dropped user base is shrinking organically. Re-add
+criteria documented in issue #85; the dropped state was filed under
+issue #66.
+
 Windows arm64 and Linux arm64 cross-build cleanly from x64 hosts
 because their installer payloads are the per-arch electron binary
 (downloaded by electron-builder) plus our pure-JS bundle.

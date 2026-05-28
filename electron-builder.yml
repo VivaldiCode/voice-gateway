@@ -41,8 +41,11 @@ mac:
   target:
     - target: dmg
       arch:
+        # x64 dropped in #66 — see release.yml header + issue #85 for the
+        # re-add criteria. Keep this list to a single arch so an explicit
+        # `electron-builder --mac --arm64` (no extra flags) produces the
+        # only DMG we ship.
         - arm64
-        - x64
   hardenedRuntime: true
   gatekeeperAssess: false
   # Ad-hoc sign (identity: false → '-'). Gives the bundle a stable code
