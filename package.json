@@ -42,7 +42,7 @@
     "lucide-react": "^0.469.0",
     "tailwind-merge": "^2.5.5",
     "ws": "^8.21.0",
-    "zustand": "^5.0.2"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
