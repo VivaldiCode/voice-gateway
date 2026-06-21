@@ -56,7 +56,7 @@ jobs:
         # actions/checkout@v4 pinned to commit SHA — supply-chain hardening
         # per issue #22. Dependabot will open PRs to bump these SHAs as
         # the actions release new versions.
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Initialise CodeQL
         # github/codeql-action@v3 pinned to commit SHA.
         uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57
