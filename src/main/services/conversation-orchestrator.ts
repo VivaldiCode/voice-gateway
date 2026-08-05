@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import log from 'electron-log/main';
 import type { HermesClient } from './hermes-client';
+import { stripHermesSseNoise } from './hermes-noise-filter';
 import type { SttAdapter } from './stt-service';
 import type { TtsAdapter, TtsChunk } from './tts-service';
 import {
@@ -254,11 +255,22 @@ export class ConversationOrchestrator extends EventEmitter {
       // for symmetry / debugging.
     });
     this.client.on('response_text', (m) => {
-      this.emit('response_text', m.text, m.final, m.turn_id);
+      // Bridge occasionally leaks raw SSE header lines (event: hermes.tool.*)
+      // into m.text. Strip them here — protects BOTH the transcript UI
+      // (users don't see framework metadata) AND the TTS pipeline (users
+      // don't hear it). See src/main/services/hermes-noise-filter.ts + issue #108.
+      const cleaned = stripHermesSseNoise(m.text);
+      if (!cleaned && !m.final) {
+        // Pure noise mid-stream — drop it entirely. Don't emit an empty
+        // partial to the UI, don't speak. A subsequent chunk (or the
+        // final frame) will carry the real assistant text.
+        return;
+      }
+      this.emit('response_text', cleaned, m.final, m.turn_id);
       if (m.final && this.ctx.state === 'THINKING') {
         // Server has nothing more to say after this. If no audio comes, the
         // FSM stays in THINKING until response_end.
-        void this.speak(m.text, m.turn_id);
+        void this.speak(cleaned, m.turn_id);
       }
     });
     this.client.on('response_audio_chunk', (header, payload) => {
