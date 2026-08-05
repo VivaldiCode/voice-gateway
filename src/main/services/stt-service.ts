@@ -271,6 +271,13 @@ export class WhisperLocalAdapter implements SttAdapter {
         '-l', req.language === 'auto' ? 'auto' : req.language,
         '-nt', // no timestamps
         '-np', // suppress whisper.cpp's own log lines on stderr
+        // Accuracy tuning (issue #110). Default whisper.cpp sampling is
+        // greedy — fast but produces materially more word substitutions
+        // (user reported "office" → "off-set"). Beam-size 5 + best-of 5
+        // matches OpenAI's reference implementation; costs ~2-3× more
+        // wall-clock but cuts WER noticeably on the `base` model.
+        '-bs', '5',
+        '-bo', '5',
         '-f', wavPath,
       ];
       const startedAt = Date.now();

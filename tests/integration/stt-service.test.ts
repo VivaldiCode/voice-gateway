@@ -224,6 +224,15 @@ describe('WhisperLocalAdapter', () => {
     const fIdx = seenArgs[0]!.indexOf('-f');
     expect(seenArgs[0]![fIdx + 1]).not.toBe('-');
     expect(seenArgs[0]![fIdx + 1]).toMatch(/\.wav$/);
+    // Accuracy tuning args (issue #110): beam-size 5 + best-of 5.
+    // Verified both flags AND their values — order-sensitive because
+    // whisper-cli reads the following token as the numeric arg.
+    const bsIdx = seenArgs[0]!.indexOf('-bs');
+    expect(bsIdx).toBeGreaterThan(-1);
+    expect(seenArgs[0]![bsIdx + 1]).toBe('5');
+    const boIdx = seenArgs[0]!.indexOf('-bo');
+    expect(boIdx).toBeGreaterThan(-1);
+    expect(seenArgs[0]![boIdx + 1]).toBe('5');
   });
 });
 
