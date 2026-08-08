@@ -58,6 +58,19 @@ export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number];
 export const SUPPORTED_WHISPER_MODELS = ['tiny', 'base', 'small'] as const;
 export type WhisperModel = (typeof SUPPORTED_WHISPER_MODELS)[number];
 
+// LLM defaults — used by `defaultSettings()` and the wizard / Settings
+// pickers. The list is curated (not exhaustive): picking the wrong model
+// name returns a confusing 404 from the provider, so the picker UI shows
+// only these IDs. Each adapter validates against this list at request time.
+// Bumped per provider's sub-issue (#57–#60); orchestrator routing in #62.
+export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+export const DEFAULT_OLLAMA_MODEL = 'llama3.2';
+export const DEFAULT_GROK_MODEL = 'grok-4';
+export const DEFAULT_CHATGPT_MODEL = 'gpt-4o-mini';
+/** Conversation-history window (in user/assistant turn pairs) sent to the LLM by default. */
+export const DEFAULT_LLM_HISTORY_TURNS = 10;
+
 export const IPC = {
   PING: 'vg:ping',
   SETTINGS_GET: 'vg:settings:get',

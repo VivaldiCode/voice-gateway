@@ -1,19 +1,27 @@
 import Store from 'electron-store';
 import log from 'electron-log/main';
 import {
+  DEFAULT_CHATGPT_MODEL,
+  DEFAULT_CLAUDE_MODEL,
   DEFAULT_GLOBAL_HOTKEY_MAC,
   DEFAULT_GLOBAL_HOTKEY_OTHER,
+  DEFAULT_GROK_MODEL,
+  DEFAULT_LLM_HISTORY_TURNS,
+  DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_OLLAMA_MODEL,
   VAD_SILENCE_MS,
   VAD_THRESHOLD_DEFAULT,
 } from '@shared/constants';
 import type { Settings } from '@shared/types';
 
+// v7: added llm.* (multi-LLM provider selection — Claude/Ollama/Grok/ChatGPT;
+//     default provider 'hermes-bridge' = current behavior unchanged). Issue #55.
 // v6: added ui.tutorialSeen (post-pair interactive tutorial flag, I5).
 // v5: added transcript.recent (persisted conversation window). v4 added
 // ui.autoLaunch + connection.{recentUrls,draftUrl}. v3 added
 // audio.outputMuted. v2 added activation.wakeMode + activation.wakePhrase.
 // Old configs are silently merged with the defaults on first boot.
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 export function defaultSettings(): Settings {
   const isMac = process.platform === 'darwin';
@@ -48,6 +56,17 @@ export function defaultSettings(): Settings {
     ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false, tutorialSeen: false },
     connection: { recentUrls: [], draftUrl: '' },
     transcript: { recent: [] },
+    llm: {
+      // 'hermes-bridge' keeps the v6 behavior exactly — bridge owns the
+      // LLM call. The other four providers light up only when the user
+      // explicitly picks one in the wizard or Settings panel (sub-issue #61).
+      provider: 'hermes-bridge',
+      claude: { apiKey: '', model: DEFAULT_CLAUDE_MODEL },
+      ollama: { baseUrl: DEFAULT_OLLAMA_BASE_URL, model: DEFAULT_OLLAMA_MODEL },
+      grok: { apiKey: '', model: DEFAULT_GROK_MODEL },
+      chatgpt: { apiKey: '', model: DEFAULT_CHATGPT_MODEL },
+      historyTurns: DEFAULT_LLM_HISTORY_TURNS,
+    },
     schemaVersion: SCHEMA_VERSION,
   };
 }

@@ -164,7 +164,7 @@ export async function writeSeedSettings(
         ui: { language: 'pt', theme: 'dark', startMinimized: false, autoLaunch: false, tutorialSeen: true },
         connection: { recentUrls: [], draftUrl: '' },
         transcript: { recent: [] },
-        schemaVersion: 6,
+        schemaVersion: 7,
       },
     }),
   );
